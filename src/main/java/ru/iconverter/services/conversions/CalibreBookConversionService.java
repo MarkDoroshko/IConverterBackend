@@ -22,8 +22,10 @@ public class CalibreBookConversionService implements IBookConversionService {
     private static final Logger log = LoggerFactory.getLogger(CalibreBookConversionService.class);
 
     // Поддерживаемые форматы
-    private static final Set<String> SUPPORTED_SOURCE_FORMATS = Set.of("fb2", "epub", "mobi", "pdf", "txt", "html", "azw3", "docx");
-    private static final Set<String> SUPPORTED_TARGET_FORMATS = Set.of("epub", "fb2", "mobi", "pdf", "txt", "html", "azw3", "docx");
+    private static final Set<String> SUPPORTED_SOURCE_FORMATS = Set.of("azw", "azw3", "azw4", "cbz", "cbr", "cb7", "cbc", "chm", "djvu", "docx", "epub", "fb2",
+            "fbz", "html", "htmlz", "kepub", "lit", "lrf", "mobi", "odt", "pdf", "prc", "pdb", "pml", "rb", "rtf", "snb", "tcr", "txt", "txtz");
+    private static final Set<String> SUPPORTED_TARGET_FORMATS = Set.of("azw3", "epub", "docx", "fb2", "htmlz", "kepub", "oeb", "lit", "lrf", "mobi", "pdb", "pmlz",
+            "rb", "pdf", "rtf", "snb", "tcr", "txt", "txtz", "zip");
 
     // Путь к временной директории (по умолчанию /tmp)
     @Value("${app.temp-dir:/tmp}")
