@@ -2,7 +2,7 @@ package ru.iconverter.controller;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.core.io.Resource;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -30,9 +30,17 @@ public class BookConversionController {
     }
 
     @PostMapping(value = "/", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<Resource> convertBook(
+    public ResponseEntity<?> convertBook(
             @RequestParam("file") MultipartFile file,
             @RequestParam("targetFormat") String targetFormat) {
+
+        long MAX_FILE_SIZE = 25 * 1024 * 1024; // 50 MB
+        if (file.getSize() > MAX_FILE_SIZE) {
+            log.warn("File size exceeds limit: {} bytes (max: {})", file.getSize(), MAX_FILE_SIZE);
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"error\": \"File size must not exceed 25 MB\"}");
+        }
 
         log.info("Convert book {} to {}", file.getOriginalFilename(), targetFormat);
 
@@ -52,7 +60,7 @@ public class BookConversionController {
                     .contentType(MediaType.APPLICATION_OCTET_STREAM)
                     .body(converted);
         } catch (Exception e) {
-            log.info("Не удалось создать ResponseEntity.");
+            log.error("Не удалось создать ResponseEntity.", e);
             throw new RuntimeException(e);
         }
     }
