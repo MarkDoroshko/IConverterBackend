@@ -1,0 +1,13 @@
+# Local dev/test compose. Builds the image from this directory.
+# Production server uses /opt/iconverter/backend/docker-compose.yml which
+# pulls a pre-built image from ghcr.io.
+services:
+  backend:
+    build: .
+    image: iconverter-backend:local
+    container_name: iconverter-backend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./logs:/app/logs
