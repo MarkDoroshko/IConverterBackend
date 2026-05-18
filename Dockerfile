@@ -28,6 +28,13 @@ RUN apt-get update \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 
+# Ubuntu ships ImageMagick with catch-all "rights=none" rules (CVE-2016-3714
+# mitigation) that block every coder/filter/delegate, breaking all conversions.
+# Remove only those catch-all patterns; targeted bans (PDF/EPS/HTTP/etc.) stay.
+RUN sed -i -E \
+      '/<policy domain="(coder|filter|delegate)" rights="none" pattern="\*"/d' \
+      /etc/ImageMagick-6/policy.xml
+
 # Non-root runtime user
 RUN useradd -u 1000 -m -s /bin/bash app
 WORKDIR /app
