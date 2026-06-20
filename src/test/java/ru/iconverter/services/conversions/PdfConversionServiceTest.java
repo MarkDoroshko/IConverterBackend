@@ -42,4 +42,19 @@ class PdfConversionServiceTest {
         assertThat(cmd).contains("-dPDFSETTINGS=/ebook", "-dNOPAUSE", "-dBATCH");
         assertThat(cmd).containsSequence("-sOutputFile=/tmp/out.pdf", "/tmp/in.pdf");
     }
+
+    @Test
+    void resolveDpi_defaultsTo150AndValidatesRange() {
+        assertThat(resolveDpi(null)).isEqualTo(150);
+        assertThat(resolveDpi(300)).isEqualTo(300);
+        assertThatThrownBy(() -> resolveDpi(50)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> resolveDpi(1000)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void buildToImagesCommand_rendersJpegAtDpi() {
+        List<String> cmd = buildToImagesCommand("/tmp/in.pdf", "/tmp/page-%03d.jpg", 200);
+        assertThat(cmd).startsWith("gs", "-sDEVICE=jpeg", "-r200");
+        assertThat(cmd).containsSequence("-o", "/tmp/page-%03d.jpg", "/tmp/in.pdf");
+    }
 }

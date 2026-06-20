@@ -48,6 +48,36 @@ public class PdfConversionController {
                 .body(compressed);
     }
 
+    @PostMapping(value = "/from-image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<?> fromImage(@RequestParam("file") MultipartFile file) {
+        if (file.isEmpty()) return badRequest("Uploaded file is empty");
+        if (file.getSize() > MAX_FILE_SIZE) return badRequest("File size must not exceed 25 MB");
+
+        var pdf = pdfConversionService.fromImage(file);
+        HttpHeaders headers = new HttpHeaders();
+        headers.add(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=converted.pdf");
+        return ResponseEntity.ok()
+                .headers(headers)
+                .contentType(MediaType.APPLICATION_PDF)
+                .body(pdf);
+    }
+
+    @PostMapping(value = "/to-jpg", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<?> toJpg(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "dpi", required = false) Integer dpi) {
+        if (file.isEmpty()) return badRequest("Uploaded file is empty");
+        if (file.getSize() > MAX_FILE_SIZE) return badRequest("File size must not exceed 25 MB");
+
+        var zip = pdfConversionService.toImages(file, dpi);
+        HttpHeaders headers = new HttpHeaders();
+        headers.add(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=pages.zip");
+        return ResponseEntity.ok()
+                .headers(headers)
+                .contentType(MediaType.valueOf("application/zip"))
+                .body(zip);
+    }
+
     private ResponseEntity<?> badRequest(String message) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .contentType(MediaType.APPLICATION_JSON)
