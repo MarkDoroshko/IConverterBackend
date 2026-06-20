@@ -21,6 +21,7 @@ RUN apt-get update \
       calibre \
       imagemagick \
       libwebp-dev \
+      libheif1 \
       ghostscript \
       ca-certificates \
       tzdata \

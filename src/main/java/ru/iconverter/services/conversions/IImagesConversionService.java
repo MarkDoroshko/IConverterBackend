@@ -8,4 +8,7 @@ import java.io.IOException;
 public interface IImagesConversionService {
 
     ByteArrayResource convertImage(MultipartFile file, String format) throws IOException;
+
+    ByteArrayResource convertImage(MultipartFile file, String format,
+                                   Integer quality, Integer maxSize) throws IOException;
 }
