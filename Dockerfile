@@ -23,6 +23,10 @@ RUN apt-get update \
       libwebp-dev \
       libheif1 \
       ghostscript \
+      libreoffice-writer \
+      libreoffice-core \
+      fonts-liberation \
+      fonts-dejavu \
       ca-certificates \
       tzdata \
  && ln -sf /usr/bin/convert /usr/local/bin/magick \
