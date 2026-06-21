@@ -38,9 +38,10 @@ RUN apt-get update \
 # that block coders/filters/delegates. Remove the catch-all patterns AND the
 # targeted PDF/PS/EPS/XPS bans so the image→PDF tool can write PDF. Inputs are
 # validated and size-capped; modern IM+Ghostscript patch the original CVE.
+# Robust: also matches the grouped form pattern="{PS,PS2,PS3,EPS,PDF,XPS}".
 RUN sed -i -E \
       -e '/<policy domain="(coder|filter|delegate)" rights="none" pattern="\*"/d' \
-      -e '/<policy domain="coder" rights="none" pattern="(PDF|PS|PS2|PS3|EPS|XPS|PDFA)"/d' \
+      -e '/<policy domain="coder" rights="none" pattern="[^"]*(PDF|PS|EPS|XPS)[^"]*"/d' \
       /etc/ImageMagick-6/policy.xml
 
 # Non-root runtime user

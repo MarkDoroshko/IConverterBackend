@@ -36,6 +36,16 @@ public class GlobalExceptionHandler {
         return json(HttpStatus.INTERNAL_SERVER_ERROR, "Conversion failed. Please try again.");
     }
 
+    // Our conversion services throw RuntimeException with a user-safe message
+    // (e.g. "Не удалось преобразовать изображение в PDF"). Surface it instead of
+    // a bare Spring 500 page so the client/operator sees the actual cause.
+    @ExceptionHandler(RuntimeException.class)
+    public ResponseEntity<?> handleRuntime(RuntimeException e) {
+        log.error("Conversion error", e);
+        return json(HttpStatus.INTERNAL_SERVER_ERROR,
+                e.getMessage() == null ? "Conversion failed" : e.getMessage());
+    }
+
     private ResponseEntity<?> json(HttpStatus status, String message) {
         String safe = message == null ? "Unexpected error" : message.replace("\"", "'");
         return ResponseEntity.status(status)
