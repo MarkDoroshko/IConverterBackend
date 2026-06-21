@@ -24,6 +24,7 @@ RUN apt-get update \
       libheif1 \
       ghostscript \
       libreoffice-writer \
+      libreoffice-draw \
       libreoffice-core \
       fonts-liberation \
       fonts-dejavu \
@@ -33,11 +34,13 @@ RUN apt-get update \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 
-# Ubuntu ships ImageMagick with catch-all "rights=none" rules (CVE-2016-3714
-# mitigation) that block every coder/filter/delegate, breaking all conversions.
-# Remove only those catch-all patterns; targeted bans (PDF/EPS/HTTP/etc.) stay.
+# Ubuntu ships ImageMagick with "rights=none" rules (CVE-2016-3714 mitigation)
+# that block coders/filters/delegates. Remove the catch-all patterns AND the
+# targeted PDF/PS/EPS/XPS bans so the image→PDF tool can write PDF. Inputs are
+# validated and size-capped; modern IM+Ghostscript patch the original CVE.
 RUN sed -i -E \
-      '/<policy domain="(coder|filter|delegate)" rights="none" pattern="\*"/d' \
+      -e '/<policy domain="(coder|filter|delegate)" rights="none" pattern="\*"/d' \
+      -e '/<policy domain="coder" rights="none" pattern="(PDF|PS|PS2|PS3|EPS|XPS|PDFA)"/d' \
       /etc/ImageMagick-6/policy.xml
 
 # Non-root runtime user
