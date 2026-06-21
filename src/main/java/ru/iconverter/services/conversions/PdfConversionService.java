@@ -123,7 +123,9 @@ public class PdfConversionService implements IPdfConversionService {
             }
             if (process.exitValue() != 0) {
                 log.error("magick image→pdf failed: {}", err);
-                throw new RuntimeException("Не удалось преобразовать изображение в PDF");
+                String detail = err.toString().trim();
+                throw new RuntimeException("Не удалось преобразовать изображение в PDF"
+                        + (detail.isEmpty() ? "" : ": " + detail.replaceAll("\\s+", " ")));
             }
             log.info("Image→PDF: {} → {} bytes", file.getSize(), out.size());
             return new ByteArrayResource(out.toByteArray());
