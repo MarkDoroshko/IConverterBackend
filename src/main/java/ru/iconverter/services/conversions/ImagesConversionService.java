@@ -9,10 +9,12 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -57,7 +59,9 @@ public class ImagesConversionService implements IImagesConversionService {
         try {
             inputFile = createTempFile("img-in-", srcExt.isEmpty() ? ".bin" : "." + srcExt);
             outputFile = createTempFile("img-out-", "." + target);
-            file.transferTo(inputFile.toFile());
+            try (InputStream in = file.getInputStream()) {
+                Files.copy(in, inputFile, StandardCopyOption.REPLACE_EXISTING);
+            }
 
             List<String> command = buildCommand(inputFile.toString(), outputFile.toString(), target, quality, maxSize);
             logger.debug("ImageMagick command: {}", command);

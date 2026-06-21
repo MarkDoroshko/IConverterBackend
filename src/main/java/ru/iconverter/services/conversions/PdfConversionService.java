@@ -17,6 +17,7 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -52,7 +53,7 @@ public class PdfConversionService implements IPdfConversionService {
         try {
             inputFile = createTempFile("pdf-in-", ".pdf");
             outputFile = createTempFile("pdf-out-", ".pdf");
-            file.transferTo(inputFile.toFile());
+            copyToFile(file, inputFile);
 
             List<String> command = buildCommand(inputFile.toString(), outputFile.toString(), setting);
             log.info("Compress PDF ({} bytes) level={} → {}", file.getSize(), level, setting);
@@ -106,7 +107,7 @@ public class PdfConversionService implements IPdfConversionService {
             String ext = getExtension(file.getOriginalFilename());
             input = createTempFile("img2pdf-in-", ext.isEmpty() ? ".bin" : "." + ext);
             output = createTempFile("img2pdf-out-", ".pdf");
-            file.transferTo(input.toFile());
+            copyToFile(file, input);
 
             List<String> command = List.of("magick", input.toString(), "pdf:" + output.toString());
             ProcessBuilder pb = new ProcessBuilder(command);
@@ -156,7 +157,7 @@ public class PdfConversionService implements IPdfConversionService {
         Path pagesDir = null;
         try {
             inputFile = createTempFile("pdf2jpg-in-", ".pdf");
-            file.transferTo(inputFile.toFile());
+            copyToFile(file, inputFile);
             pagesDir = Files.createTempDirectory(Paths.get(tempDir), "pdf2jpg-out-");
             String outPattern = pagesDir.resolve("page-%03d.jpg").toString();
 
@@ -242,6 +243,15 @@ public class PdfConversionService implements IPdfConversionService {
                 "-sOutputFile=" + output,
                 input
         );
+    }
+
+    // Reliable write of the upload to a pre-created temp file. file.transferTo()
+    // can no-op when the destination already exists (Tomcat move semantics), so
+    // copy the stream explicitly with REPLACE_EXISTING.
+    private void copyToFile(MultipartFile file, Path dest) throws IOException {
+        try (InputStream in = file.getInputStream()) {
+            Files.copy(in, dest, StandardCopyOption.REPLACE_EXISTING);
+        }
     }
 
     private Path createTempFile(String prefix, String suffix) throws IOException {
