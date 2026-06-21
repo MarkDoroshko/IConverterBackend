@@ -2,11 +2,17 @@ package ru.iconverter.services.conversions;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -17,17 +23,17 @@ public class ImagesConversionService implements IImagesConversionService {
 
     private static final Logger logger = LoggerFactory.getLogger(ImagesConversionService.class);
 
-    // Raster output formats we allow. Vector/PDF output from a raster source is
-    // intentionally excluded — it produces a bitmap wrapped in a container, which
-    // surprises users. Input format is auto-detected by ImageMagick from the
-    // stream, so HEIC/HEIF and others work without an explicit input whitelist.
+    // Raster output formats we allow. Input format is auto-detected by
+    // ImageMagick from the file content, so HEIC/HEIF and others work.
     public static final Set<String> SUPPORTED_TARGET_FORMATS =
             Set.of("jpg", "jpeg", "png", "gif", "bmp", "webp", "tiff");
 
-    // Bounds for optional tuning params.
     private static final int MIN_QUALITY = 1;
     private static final int MAX_QUALITY = 100;
-    private static final int MAX_DIMENSION_LIMIT = 10000; // px, sanity cap
+    private static final int MAX_DIMENSION_LIMIT = 10000;
+
+    @Value("${app.temp-dir:/tmp}")
+    private String tempDir;
 
     @Override
     public ByteArrayResource convertImage(MultipartFile file, String format) throws IOException {
@@ -40,54 +46,49 @@ public class ImagesConversionService implements IImagesConversionService {
         String target = normalizeFormat(format);
         validateTargetFormat(target);
 
-        logger.info("Image conversion → {} (quality={}, maxSize={}), input {} bytes, type {}",
-                target, quality, maxSize, file.getSize(), file.getContentType());
+        logger.info("Image conversion → {} (quality={}, maxSize={}), input {} bytes",
+                target, quality, maxSize, file.getSize());
 
-        byte[] fileBytes = file.getBytes();
-        List<String> command = buildCommand(target, quality, maxSize);
-        logger.debug("ImageMagick command: {}", command);
+        // Temp files (not stdin/stdout pipes): robust and matches the Calibre
+        // path. Input keeps its original extension to help format detection.
+        String srcExt = getExtension(file.getOriginalFilename());
+        Path inputFile = null;
+        Path outputFile = null;
+        try {
+            inputFile = createTempFile("img-in-", srcExt.isEmpty() ? ".bin" : "." + srcExt);
+            outputFile = createTempFile("img-out-", "." + target);
+            file.transferTo(inputFile.toFile());
 
-        ProcessBuilder processBuilder = new ProcessBuilder(command);
-        Process process = processBuilder.start();
+            List<String> command = buildCommand(inputFile.toString(), outputFile.toString(), target, quality, maxSize);
+            logger.debug("ImageMagick command: {}", command);
 
-        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-        StringBuilder errorOutput = new StringBuilder();
-
-        try (OutputStream processOutputStream = process.getOutputStream();
-             InputStream processInputStream = process.getInputStream();
-             InputStream errorStream = process.getErrorStream()) {
-
-            // Write the uploaded bytes to the process stdin.
-            processOutputStream.write(fileBytes);
-            processOutputStream.close();
-
-            byte[] buffer = new byte[8192];
-            int bytesRead;
-            while ((bytesRead = processInputStream.read(buffer)) != -1) {
-                outputStream.write(buffer, 0, bytesRead);
+            ProcessBuilder pb = new ProcessBuilder(command);
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
+            StringBuilder output = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) output.append(line).append('\n');
             }
-            while ((bytesRead = errorStream.read(buffer)) != -1) {
-                errorOutput.append(new String(buffer, 0, bytesRead));
-            }
-
             if (!process.waitFor(30, TimeUnit.SECONDS)) {
                 process.destroyForcibly();
                 throw new IOException("Conversion timed out");
             }
-
-            int exitCode = process.exitValue();
-            if (exitCode != 0) {
-                logger.error("ImageMagick failed (exit {}): {}", exitCode, errorOutput);
-                throw new IOException("Conversion failed with exit code: " + exitCode);
+            if (process.exitValue() != 0) {
+                logger.error("ImageMagick failed (exit {}): {}", process.exitValue(), output);
+                throw new IOException("Conversion failed: " + output.toString().trim());
             }
+
+            byte[] result = Files.readAllBytes(outputFile);
+            logger.info("Conversion completed. Output size: {} bytes", result.length);
+            return new ByteArrayResource(result);
         } catch (InterruptedException e) {
-            logger.error("Conversion interrupted", e);
             Thread.currentThread().interrupt();
             throw new IOException("Conversion interrupted", e);
+        } finally {
+            cleanupQuietly(inputFile);
+            cleanupQuietly(outputFile);
         }
-
-        logger.info("Conversion completed. Output size: {} bytes", outputStream.size());
-        return new ByteArrayResource(outputStream.toByteArray());
     }
 
     // ── Pure helpers (unit-tested) ──────────────────────────────────────
@@ -97,6 +98,11 @@ public class ImagesConversionService implements IImagesConversionService {
         return format.trim().toLowerCase().replaceAll("^\\.", "");
     }
 
+    static String getExtension(String filename) {
+        if (filename == null || filename.lastIndexOf('.') < 0) return "";
+        return filename.substring(filename.lastIndexOf('.') + 1).toLowerCase();
+    }
+
     static void validateTargetFormat(String target) {
         if (!SUPPORTED_TARGET_FORMATS.contains(target)) {
             throw new IllegalArgumentException("Unsupported target format: " + target
@@ -104,18 +110,16 @@ public class ImagesConversionService implements IImagesConversionService {
         }
     }
 
-    // Build the `magick` invocation. Reads from stdin ("-"), writes the chosen
-    // format to stdout ("format:-"). Optional resize (preserve aspect ratio,
-    // only shrink) and quality come before the output target.
-    static List<String> buildCommand(String target, Integer quality, Integer maxSize) {
+    // magick <input> [-resize NxN>] [-quality N] <target>:<output>
+    static List<String> buildCommand(String input, String output, String target,
+                                     Integer quality, Integer maxSize) {
         List<String> cmd = new ArrayList<>();
         cmd.add("magick");
-        cmd.add("-");
+        cmd.add(input);
         if (maxSize != null) {
             if (maxSize < 1 || maxSize > MAX_DIMENSION_LIMIT) {
                 throw new IllegalArgumentException("maxSize must be 1.." + MAX_DIMENSION_LIMIT);
             }
-            // ">" = only shrink images larger than the box, never enlarge.
             cmd.add("-resize");
             cmd.add(maxSize + "x" + maxSize + ">");
         }
@@ -126,7 +130,23 @@ public class ImagesConversionService implements IImagesConversionService {
             cmd.add("-quality");
             cmd.add(String.valueOf(quality));
         }
-        cmd.add(target + ":-");
+        cmd.add(target + ":" + output);
         return cmd;
+    }
+
+    private Path createTempFile(String prefix, String suffix) throws IOException {
+        Path dir = Paths.get(tempDir);
+        if (!Files.exists(dir)) Files.createDirectories(dir);
+        return Files.createTempFile(dir, prefix, suffix);
+    }
+
+    private void cleanupQuietly(Path path) {
+        if (path != null) {
+            try {
+                Files.deleteIfExists(path);
+            } catch (IOException e) {
+                logger.warn("Не удалось удалить временный файл: {}", path, e);
+            }
+        }
     }
 }

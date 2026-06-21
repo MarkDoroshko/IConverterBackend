@@ -99,42 +99,50 @@ public class PdfConversionService implements IPdfConversionService {
         if (file.isEmpty()) {
             throw new IllegalArgumentException("Загруженный файл пустой.");
         }
+        // Temp files (not pipes): ImageMagick reads the image file, writes a PDF.
+        Path input = null;
+        Path output = null;
         try {
-            // ImageMagick reads the image from stdin, writes a PDF to stdout.
-            byte[] bytes = file.getBytes();
-            ProcessBuilder pb = new ProcessBuilder("magick", "-", "pdf:-");
-            Process process = pb.start();
+            String ext = getExtension(file.getOriginalFilename());
+            input = createTempFile("img2pdf-in-", ext.isEmpty() ? ".bin" : "." + ext);
+            output = createTempFile("img2pdf-out-", ".pdf");
+            file.transferTo(input.toFile());
 
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            StringBuilder err = new StringBuilder();
-            try (OutputStream stdin = process.getOutputStream();
-                 InputStream stdout = process.getInputStream();
-                 InputStream stderr = process.getErrorStream()) {
-                stdin.write(bytes);
-                stdin.close();
-                byte[] buf = new byte[8192];
-                int n;
-                while ((n = stdout.read(buf)) != -1) out.write(buf, 0, n);
-                while ((n = stderr.read(buf)) != -1) err.append(new String(buf, 0, n));
+            List<String> command = List.of("magick", input.toString(), "pdf:" + output.toString());
+            ProcessBuilder pb = new ProcessBuilder(command);
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
+            StringBuilder out = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) out.append(line).append('\n');
             }
             if (!process.waitFor(30, TimeUnit.SECONDS)) {
                 process.destroyForcibly();
                 throw new RuntimeException("Конвертация изображения в PDF превысила лимит времени");
             }
             if (process.exitValue() != 0) {
-                log.error("magick image→pdf failed: {}", err);
-                String detail = err.toString().trim();
-                throw new RuntimeException("Не удалось преобразовать изображение в PDF"
-                        + (detail.isEmpty() ? "" : ": " + detail.replaceAll("\\s+", " ")));
+                log.error("magick image→pdf failed: {}", out);
+                throw new RuntimeException("Не удалось преобразовать изображение в PDF: "
+                        + out.toString().trim().replaceAll("\\s+", " "));
             }
-            log.info("Image→PDF: {} → {} bytes", file.getSize(), out.size());
-            return new ByteArrayResource(out.toByteArray());
+            byte[] bytes = Files.readAllBytes(output);
+            log.info("Image→PDF: {} → {} bytes", file.getSize(), bytes.length);
+            return new ByteArrayResource(bytes);
         } catch (IOException e) {
             throw new RuntimeException("Ошибка при обработке изображения: " + e.getMessage(), e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Конвертация прервана", e);
+        } finally {
+            cleanupQuietly(input);
+            cleanupQuietly(output);
         }
+    }
+
+    static String getExtension(String filename) {
+        if (filename == null || filename.lastIndexOf('.') < 0) return "";
+        return filename.substring(filename.lastIndexOf('.') + 1).toLowerCase();
     }
 
     @Override

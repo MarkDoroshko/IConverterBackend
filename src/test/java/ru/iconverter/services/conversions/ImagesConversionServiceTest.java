@@ -37,38 +37,45 @@ class ImagesConversionServiceTest {
     }
 
     @Test
+    void getExtension_extractsLowercaseExt() {
+        assertThat(getExtension("photo.JPG")).isEqualTo("jpg");
+        assertThat(getExtension("a.b.heic")).isEqualTo("heic");
+        assertThat(getExtension("noext")).isEqualTo("");
+    }
+
+    @Test
     void buildCommand_minimal() {
-        assertThat(buildCommand("png", null, null))
-                .containsExactly("magick", "-", "png:-");
+        assertThat(buildCommand("/in.png", "/out.png", "png", null, null))
+                .containsExactly("magick", "/in.png", "png:/out.png");
     }
 
     @Test
     void buildCommand_withQuality() {
-        assertThat(buildCommand("jpg", 80, null))
-                .containsExactly("magick", "-", "-quality", "80", "jpg:-");
+        assertThat(buildCommand("/in.png", "/out.jpg", "jpg", 80, null))
+                .containsExactly("magick", "/in.png", "-quality", "80", "jpg:/out.jpg");
     }
 
     @Test
     void buildCommand_withResize_onlyShrinks() {
-        assertThat(buildCommand("webp", null, 1024))
-                .containsExactly("magick", "-", "-resize", "1024x1024>", "webp:-");
+        assertThat(buildCommand("/in.png", "/out.webp", "webp", null, 1024))
+                .containsExactly("magick", "/in.png", "-resize", "1024x1024>", "webp:/out.webp");
     }
 
     @Test
     void buildCommand_withResizeAndQuality_orderIsResizeThenQuality() {
-        assertThat(buildCommand("jpg", 70, 800))
-                .containsExactly("magick", "-", "-resize", "800x800>", "-quality", "70", "jpg:-");
+        assertThat(buildCommand("/in.png", "/out.jpg", "jpg", 70, 800))
+                .containsExactly("magick", "/in.png", "-resize", "800x800>", "-quality", "70", "jpg:/out.jpg");
     }
 
     @Test
     void buildCommand_rejectsBadQuality() {
-        assertThatThrownBy(() -> buildCommand("jpg", 0, null)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> buildCommand("jpg", 101, null)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> buildCommand("/i", "/o", "jpg", 0, null)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> buildCommand("/i", "/o", "jpg", 101, null)).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void buildCommand_rejectsBadResize() {
-        assertThatThrownBy(() -> buildCommand("jpg", null, 0)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> buildCommand("jpg", null, 99999)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> buildCommand("/i", "/o", "jpg", null, 0)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> buildCommand("/i", "/o", "jpg", null, 99999)).isInstanceOf(IllegalArgumentException.class);
     }
 }
