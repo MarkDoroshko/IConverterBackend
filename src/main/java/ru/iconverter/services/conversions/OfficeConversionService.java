@@ -29,9 +29,13 @@ public class OfficeConversionService implements IOfficeConversionService {
     public static final Set<String> SUPPORTED_TARGET_FORMATS =
             Set.of("pdf", "docx", "doc", "odt", "rtf", "txt");
 
-    // Accepted input extensions (Word↔PDF and friends).
+    // Accepted input extensions. NOTE: PDF is intentionally NOT here — LibreOffice
+    // opens PDFs in Draw, which cannot export to Writer formats (.docx/.odt/...),
+    // so `soffice --convert-to docx input.pdf` silently produces no output file.
+    // PDF-source conversions are routed to Calibre (ebook-convert) in the
+    // controller instead. See OfficeConversionController.
     public static final Set<String> SUPPORTED_SOURCE_FORMATS =
-            Set.of("pdf", "docx", "doc", "odt", "rtf", "txt", "html", "htm");
+            Set.of("docx", "doc", "odt", "rtf", "txt", "html", "htm");
 
     @Value("${app.temp-dir:/tmp}")
     private String tempDir;

@@ -6,6 +6,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static ru.iconverter.services.conversions.OfficeConversionService.*;
 
 // Pure-logic tests for the LibreOffice command builder and validation.
@@ -27,19 +28,30 @@ class OfficeConversionServiceTest {
 
     @Test
     void validate_acceptsWordToPdf() {
-        validate("docx", "pdf"); // no throw
-        validate("pdf", "docx"); // no throw
+        assertDoesNotThrow(() -> validate("docx", "pdf"));
+        assertDoesNotThrow(() -> validate("odt", "pdf"));
+    }
+
+    @Test
+    void validate_rejectsPdfSource() {
+        // PDF→office is handled by Calibre, not LibreOffice. The office service
+        // must reject PDF input so we never silently produce an empty result.
+        assertThatThrownBy(() -> validate("pdf", "docx"))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void validate_rejectsUnsupported() {
-        assertThatThrownBy(() -> validate("exe", "pdf")).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> validate("docx", "exe")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> validate("exe", "pdf"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> validate("docx", "exe"))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void validate_rejectsSameFormat() {
-        assertThatThrownBy(() -> validate("pdf", "pdf")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> validate("pdf", "pdf"))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -51,4 +63,5 @@ class OfficeConversionServiceTest {
         assertThat(cmd).containsSequence("--outdir", "/work");
         assertThat(cmd).endsWith("/work/input.docx");
     }
+
 }
