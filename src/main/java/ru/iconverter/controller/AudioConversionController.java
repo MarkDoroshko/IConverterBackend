@@ -18,7 +18,8 @@ public class AudioConversionController {
 
     private static final Logger log = LoggerFactory.getLogger(AudioConversionController.class);
 
-    private static final long MAX_FILE_SIZE = 25L * 1024 * 1024;
+    // Audio/video files are larger than documents/images — allow up to 50 MB.
+    private static final long MAX_FILE_SIZE = 50L * 1024 * 1024;
 
     private static final Map<String, String> MIME = Map.of(
             "mp3", "audio/mpeg", "wav", "audio/wav", "aac", "audio/aac",
@@ -38,7 +39,7 @@ public class AudioConversionController {
         if (file.isEmpty()) return badRequest("Uploaded file is empty");
         if (file.getSize() > MAX_FILE_SIZE) {
             log.warn("Audio exceeds limit: {} bytes", file.getSize());
-            return badRequest("File size must not exceed 25 MB");
+            return badRequest("File size must not exceed 50 MB");
         }
 
         var converted = audioConversionService.convert(file, targetFormat);

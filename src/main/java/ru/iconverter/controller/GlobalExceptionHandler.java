@@ -27,7 +27,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ResponseEntity<?> handleTooLarge(MaxUploadSizeExceededException e) {
-        return json(HttpStatus.BAD_REQUEST, "File size must not exceed 25 MB");
+        return json(HttpStatus.BAD_REQUEST, "Файл слишком большой");
     }
 
     @ExceptionHandler(IOException.class)
