@@ -74,6 +74,10 @@ public class AudioConversionService implements IAudioConversionService {
             }
             if (process.exitValue() != 0) {
                 log.error("ffmpeg failed (exit {}): {}", process.exitValue(), output);
+                if (noAudioStream(output.toString())) {
+                    throw new IllegalArgumentException(
+                            "В загруженном файле нет звуковой дорожки — извлекать нечего.");
+                }
                 throw new RuntimeException("Не удалось сконвертировать аудио");
             }
 
@@ -102,6 +106,17 @@ public class AudioConversionService implements IAudioConversionService {
     static String getExtension(String filename) {
         if (filename == null || filename.lastIndexOf('.') < 0) return "";
         return filename.substring(filename.lastIndexOf('.') + 1);
+    }
+
+    // When a video has no audio track, `ffmpeg -vn` produces no output stream and
+    // exits with one of these messages. Detect that to return a clear 400 instead
+    // of a generic failure.
+    static boolean noAudioStream(String ffmpegOutput) {
+        if (ffmpegOutput == null) return false;
+        String s = ffmpegOutput.toLowerCase();
+        return s.contains("does not contain any stream")
+                || s.contains("matches no streams")
+                || s.contains("output file does not contain any stream");
     }
 
     static void validate(String source, String target) {

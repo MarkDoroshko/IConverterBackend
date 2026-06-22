@@ -50,4 +50,12 @@ class AudioConversionServiceTest {
         assertThatThrownBy(() -> validate("mp4", "xyz")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> validate("exe", "mp3")).isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void noAudioStream_detectsFfmpegMessages() {
+        assertThat(noAudioStream("Output file #0 does not contain any stream")).isTrue();
+        assertThat(noAudioStream("Stream map '0:a' matches no streams.")).isTrue();
+        assertThat(noAudioStream("some other ffmpeg error")).isFalse();
+        assertThat(noAudioStream(null)).isFalse();
+    }
 }
