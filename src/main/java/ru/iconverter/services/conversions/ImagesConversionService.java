@@ -95,6 +95,21 @@ public class ImagesConversionService implements IImagesConversionService {
         }
     }
 
+    @Override
+    public ByteArrayResource resize(MultipartFile file, Integer width, Integer height, String mode) throws IOException {
+        String ext = outputExt(file);
+        String geometry = buildResizeGeometry(width, height, mode);
+        logger.info("Image resize → {} (mode={}), input {} bytes", geometry, mode, file.getSize());
+        return runMagick(file, ext, List.of("-resize", geometry));
+    }
+
+    @Override
+    public ByteArrayResource crop(MultipartFile file, int width, int height, String gravity) throws IOException {
+        String ext = outputExt(file);
+        logger.info("Image crop → {}x{} (gravity={}), input {} bytes", width, height, gravity, file.getSize());
+        return runMagick(file, ext, buildCropOps(width, height, gravity));
+    }
+
     // ── Pure helpers (unit-tested) ──────────────────────────────────────
 
     static String normalizeFormat(String format) {
@@ -136,6 +151,110 @@ public class ImagesConversionService implements IImagesConversionService {
         }
         cmd.add(target + ":" + output);
         return cmd;
+    }
+
+    // Output keeps the input format; reject formats ImageMagick can't write here.
+    static String outputExt(MultipartFile file) {
+        String ext = getExtension(file.getOriginalFilename());
+        if (ext.equals("jpeg")) ext = "jpg";
+        validateTargetFormat(ext);
+        return ext;
+    }
+
+    static void checkDim(int v) {
+        if (v < 1 || v > MAX_DIMENSION_LIMIT) {
+            throw new IllegalArgumentException("Размер должен быть 1.." + MAX_DIMENSION_LIMIT);
+        }
+    }
+
+    // Build an ImageMagick -resize geometry from width/height/mode.
+    static String buildResizeGeometry(Integer width, Integer height, String mode) {
+        String m = mode == null ? "fit" : mode.trim().toLowerCase();
+        if (m.equals("percent")) {
+            if (width == null || width < 1 || width > 1000) {
+                throw new IllegalArgumentException("Процент должен быть 1..1000");
+            }
+            return width + "%";
+        }
+        if (width == null && height == null) {
+            throw new IllegalArgumentException("Укажите ширину и/или высоту");
+        }
+        if (width != null) checkDim(width);
+        if (height != null) checkDim(height);
+        String g = (width == null ? "" : width) + "x" + (height == null ? "" : height);
+        return m.equals("exact") ? g + "!" : g; // "fit" preserves aspect ratio
+    }
+
+    private static final Set<String> GRAVITIES = Set.of(
+            "center", "north", "south", "east", "west",
+            "northwest", "northeast", "southwest", "southeast");
+
+    static String normGravity(String gravity) {
+        String g = gravity == null ? "center" : gravity.trim().toLowerCase();
+        if (!GRAVITIES.contains(g)) {
+            throw new IllegalArgumentException("Недопустимое значение gravity: " + gravity);
+        }
+        // ImageMagick wants CamelCase gravity names (Center, NorthWest, …).
+        switch (g) {
+            case "northwest": return "NorthWest";
+            case "northeast": return "NorthEast";
+            case "southwest": return "SouthWest";
+            case "southeast": return "SouthEast";
+            default: return Character.toUpperCase(g.charAt(0)) + g.substring(1);
+        }
+    }
+
+    // Cover-crop: scale to fill WxH (^), then trim the overflow with -extent.
+    static List<String> buildCropOps(int width, int height, String gravity) {
+        checkDim(width);
+        checkDim(height);
+        String wh = width + "x" + height;
+        return List.of("-resize", wh + "^", "-gravity", normGravity(gravity), "-extent", wh, "+repage");
+    }
+
+    // Run `magick <input> <ops...> <ext>:<output>` and return the bytes.
+    private ByteArrayResource runMagick(MultipartFile file, String ext, List<String> ops) throws IOException {
+        Path inputFile = null;
+        Path outputFile = null;
+        try {
+            inputFile = createTempFile("img-in-", "." + ext);
+            outputFile = createTempFile("img-out-", "." + ext);
+            try (InputStream in = file.getInputStream()) {
+                Files.copy(in, inputFile, StandardCopyOption.REPLACE_EXISTING);
+            }
+            List<String> command = new ArrayList<>();
+            command.add("magick");
+            command.add(inputFile.toString());
+            command.addAll(ops);
+            command.add(ext + ":" + outputFile.toString());
+            logger.debug("ImageMagick command: {}", command);
+
+            ProcessBuilder pb = new ProcessBuilder(command);
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
+            StringBuilder output = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) output.append(line).append('\n');
+            }
+            if (!process.waitFor(30, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                throw new IOException("Operation timed out");
+            }
+            if (process.exitValue() != 0) {
+                logger.error("ImageMagick failed (exit {}): {}", process.exitValue(), output);
+                throw new IOException("Operation failed: " + output.toString().trim());
+            }
+            byte[] result = Files.readAllBytes(outputFile);
+            logger.info("Image op completed. Output size: {} bytes", result.length);
+            return new ByteArrayResource(result);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Operation interrupted", e);
+        } finally {
+            cleanupQuietly(inputFile);
+            cleanupQuietly(outputFile);
+        }
     }
 
     private Path createTempFile(String prefix, String suffix) throws IOException {

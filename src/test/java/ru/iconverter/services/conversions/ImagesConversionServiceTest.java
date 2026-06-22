@@ -78,4 +78,35 @@ class ImagesConversionServiceTest {
         assertThatThrownBy(() -> buildCommand("/i", "/o", "jpg", null, 0)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> buildCommand("/i", "/o", "jpg", null, 99999)).isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void buildResizeGeometry_modes() {
+        assertThat(buildResizeGeometry(800, 600, "fit")).isEqualTo("800x600");
+        assertThat(buildResizeGeometry(800, 600, "exact")).isEqualTo("800x600!");
+        assertThat(buildResizeGeometry(800, null, "fit")).isEqualTo("800x");
+        assertThat(buildResizeGeometry(null, 600, "fit")).isEqualTo("x600");
+        assertThat(buildResizeGeometry(50, null, "percent")).isEqualTo("50%");
+    }
+
+    @Test
+    void buildResizeGeometry_rejectsBadInput() {
+        assertThatThrownBy(() -> buildResizeGeometry(null, null, "fit")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> buildResizeGeometry(0, 100, "fit")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> buildResizeGeometry(99999, null, "fit")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> buildResizeGeometry(0, null, "percent")).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void buildCropOps_coverCropSequence() {
+        assertThat(buildCropOps(1080, 1080, "center"))
+                .containsExactly("-resize", "1080x1080^", "-gravity", "Center", "-extent", "1080x1080", "+repage");
+    }
+
+    @Test
+    void normGravity_mapsToImageMagickNames() {
+        assertThat(normGravity(null)).isEqualTo("Center");
+        assertThat(normGravity("north")).isEqualTo("North");
+        assertThat(normGravity("southeast")).isEqualTo("SouthEast");
+        assertThatThrownBy(() -> normGravity("middle")).isInstanceOf(IllegalArgumentException.class);
+    }
 }

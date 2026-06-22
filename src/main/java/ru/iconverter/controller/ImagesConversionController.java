@@ -55,6 +55,55 @@ public class ImagesConversionController {
                 .body((Resource) resource);
     }
 
+    @PostMapping(value = "/resize")
+    public ResponseEntity<?> resizeImage(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "width", required = false) Integer width,
+            @RequestParam(value = "height", required = false) Integer height,
+            @RequestParam(value = "mode", required = false) String mode) throws IOException {
+
+        ResponseEntity<?> bad = validate(file);
+        if (bad != null) return bad;
+
+        var resource = imagesConversionService.resize(file, width, height, mode);
+        return ResponseEntity.ok()
+                .contentType(mediaTypeFor(file))
+                .body((Resource) resource);
+    }
+
+    @PostMapping(value = "/crop")
+    public ResponseEntity<?> cropImage(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam("width") int width,
+            @RequestParam("height") int height,
+            @RequestParam(value = "gravity", required = false) String gravity) throws IOException {
+
+        ResponseEntity<?> bad = validate(file);
+        if (bad != null) return bad;
+
+        var resource = imagesConversionService.crop(file, width, height, gravity);
+        return ResponseEntity.ok()
+                .contentType(mediaTypeFor(file))
+                .body((Resource) resource);
+    }
+
+    // Output keeps the input format; derive content type from the file extension.
+    private MediaType mediaTypeFor(MultipartFile file) {
+        String name = file.getOriginalFilename();
+        int dot = name == null ? -1 : name.lastIndexOf('.');
+        String ext = dot >= 0 ? name.substring(dot + 1) : "";
+        return mediaTypeService.getMediaType(ext);
+    }
+
+    private ResponseEntity<?> validate(MultipartFile file) {
+        if (file.isEmpty()) return badRequest("Uploaded file is empty");
+        if (file.getSize() > MAX_FILE_SIZE) {
+            log.warn("Image exceeds limit: {} bytes (max {})", file.getSize(), MAX_FILE_SIZE);
+            return badRequest("File size must not exceed 25 MB");
+        }
+        return null;
+    }
+
     private ResponseEntity<?> badRequest(String message) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .contentType(MediaType.APPLICATION_JSON)
