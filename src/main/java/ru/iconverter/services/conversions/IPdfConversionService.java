@@ -3,7 +3,12 @@ package ru.iconverter.services.conversions;
 import org.springframework.core.io.Resource;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.List;
+
 public interface IPdfConversionService {
+
+    // Merge several PDFs into one (via Ghostscript), preserving the given order.
+    Resource merge(List<MultipartFile> files);
 
     // Compress a PDF via Ghostscript. `level` is one of screen|ebook|printer
     // (smallest → highest quality). Returns the compressed PDF bytes.

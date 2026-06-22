@@ -57,4 +57,12 @@ class PdfConversionServiceTest {
         assertThat(cmd).startsWith("gs", "-sDEVICE=jpeg", "-r200");
         assertThat(cmd).containsSequence("-o", "/tmp/page-%03d.jpg", "/tmp/in.pdf");
     }
+
+    @Test
+    void buildMergeCommand_appendsInputsInOrder() {
+        List<String> cmd = buildMergeCommand(List.of("/tmp/a.pdf", "/tmp/b.pdf", "/tmp/c.pdf"), "/tmp/out.pdf");
+        assertThat(cmd).startsWith("gs", "-dBATCH", "-dNOPAUSE", "-q", "-sDEVICE=pdfwrite");
+        assertThat(cmd).contains("-sOutputFile=/tmp/out.pdf");
+        assertThat(cmd).endsWith("/tmp/a.pdf", "/tmp/b.pdf", "/tmp/c.pdf");
+    }
 }

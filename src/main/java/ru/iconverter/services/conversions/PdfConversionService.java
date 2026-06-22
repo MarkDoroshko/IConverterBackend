@@ -18,6 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +41,72 @@ public class PdfConversionService implements IPdfConversionService {
 
     @Value("${app.temp-dir:/tmp}")
     private String tempDir;
+
+    @Override
+    public Resource merge(List<MultipartFile> files) {
+        if (files == null || files.size() < 2) {
+            throw new IllegalArgumentException("Загрузите минимум два PDF-файла.");
+        }
+        List<Path> inputs = new ArrayList<>();
+        Path output = null;
+        try {
+            for (MultipartFile f : files) {
+                if (f.isEmpty()) {
+                    throw new IllegalArgumentException("Один из загруженных файлов пустой.");
+                }
+                Path in = createTempFile("pdf-merge-in-", ".pdf");
+                copyToFile(f, in);
+                inputs.add(in);
+            }
+            output = createTempFile("pdf-merge-out-", ".pdf");
+
+            List<String> command = buildMergeCommand(
+                    inputs.stream().map(Path::toString).toList(), output.toString());
+            log.info("Merge {} PDFs", files.size());
+            log.debug("Ghostscript command: {}", command);
+
+            ProcessBuilder pb = new ProcessBuilder(command);
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
+            StringBuilder out = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) out.append(line).append('\n');
+            }
+            if (!process.waitFor(60, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                throw new RuntimeException("Объединение PDF превысило лимит времени");
+            }
+            if (process.exitValue() != 0) {
+                log.error("Ghostscript merge failed (exit {}): {}", process.exitValue(), out);
+                throw new RuntimeException("Не удалось объединить PDF. Проверьте, что все файлы — корректные PDF.");
+            }
+
+            byte[] result = Files.readAllBytes(output);
+            log.info("Merged {} PDFs → {} bytes", files.size(), result.length);
+            return new ByteArrayResource(result);
+
+        } catch (IOException e) {
+            log.error("PDF merge I/O error", e);
+            throw new RuntimeException("Ошибка при объединении PDF: " + e.getMessage(), e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Объединение PDF прервано", e);
+        } finally {
+            for (Path p : inputs) cleanupQuietly(p);
+            cleanupQuietly(output);
+        }
+    }
+
+    // gs -dBATCH -dNOPAUSE -q -sDEVICE=pdfwrite -sOutputFile=out in1 in2 …
+    static List<String> buildMergeCommand(List<String> inputs, String output) {
+        List<String> cmd = new ArrayList<>(List.of(
+                "gs", "-dBATCH", "-dNOPAUSE", "-q",
+                "-sDEVICE=pdfwrite", "-dCompatibilityLevel=1.4",
+                "-sOutputFile=" + output));
+        cmd.addAll(inputs);
+        return cmd;
+    }
 
     @Override
     public Resource compress(MultipartFile file, String level) {

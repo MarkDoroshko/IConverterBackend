@@ -10,6 +10,8 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import ru.iconverter.services.conversions.IPdfConversionService;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/convert/pdf")
 public class PdfConversionController {
@@ -22,6 +24,28 @@ public class PdfConversionController {
 
     public PdfConversionController(IPdfConversionService pdfConversionService) {
         this.pdfConversionService = pdfConversionService;
+    }
+
+    @PostMapping(value = "/merge", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<?> merge(@RequestParam("files") List<MultipartFile> files) {
+        if (files == null || files.size() < 2) {
+            return badRequest("Upload at least two PDF files");
+        }
+        for (MultipartFile f : files) {
+            if (f.isEmpty()) return badRequest("One of the uploaded files is empty");
+            if (f.getSize() > MAX_FILE_SIZE) {
+                log.warn("PDF exceeds limit: {} bytes", f.getSize());
+                return badRequest("Each file must not exceed 25 MB");
+            }
+        }
+
+        var merged = pdfConversionService.merge(files);
+        HttpHeaders headers = new HttpHeaders();
+        headers.add(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=merged.pdf");
+        return ResponseEntity.ok()
+                .headers(headers)
+                .contentType(MediaType.APPLICATION_PDF)
+                .body(merged);
     }
 
     @PostMapping(value = "/compress", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
