@@ -34,7 +34,7 @@ public class BookConversionController {
             @RequestParam("file") MultipartFile file,
             @RequestParam("targetFormat") String targetFormat) {
 
-        long MAX_FILE_SIZE = 25 * 1024 * 1024; // 50 MB
+        long MAX_FILE_SIZE = 25 * 1024 * 1024; // 25 MB
         if (file.getSize() > MAX_FILE_SIZE) {
             log.warn("File size exceeds limit: {} bytes (max: {})", file.getSize(), MAX_FILE_SIZE);
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)

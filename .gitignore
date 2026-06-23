@@ -118,8 +118,9 @@ fabric.properties
 # Compiled class file
 *.class
 
-# Log file
+# Log files (incl. rotated/compressed: application.log.2025-09-22.0.gz)
 *.log
+application.log.*
 
 # BlueJ files
 *.ctxt
