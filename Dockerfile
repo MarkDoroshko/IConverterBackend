@@ -16,6 +16,9 @@ FROM eclipse-temurin:17-jre-jammy
 
 # Calibre (ebook-convert) + ImageMagick. ImageMagick 6 ships `convert`;
 # the backend calls `magick`, so we expose a compat symlink.
+# libreoffice-calc/-impress: Excel/PowerPoint headless conversion.
+# tesseract-ocr(+rus): PDF OCR text extraction. poppler-utils: pdftoppm/pdftotext
+# for OCR page rasterization and layout-preserving text extraction.
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       calibre \
@@ -26,7 +29,12 @@ RUN apt-get update \
       ghostscript \
       libreoffice-writer \
       libreoffice-draw \
+      libreoffice-calc \
+      libreoffice-impress \
       libreoffice-core \
+      tesseract-ocr \
+      tesseract-ocr-rus \
+      poppler-utils \
       fonts-liberation \
       fonts-dejavu \
       ca-certificates \

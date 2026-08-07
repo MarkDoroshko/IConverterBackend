@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -22,6 +23,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
@@ -38,6 +40,8 @@ public class PdfConversionService implements IPdfConversionService {
             "ebook", "/ebook",     // 150 dpi — balanced (default)
             "printer", "/printer"  // 300 dpi — highest quality
     );
+
+    static final Set<String> OCR_TARGET_FORMATS = Set.of("txt", "pdf");
 
     @Value("${app.temp-dir:/tmp}")
     private String tempDir;
@@ -263,7 +267,132 @@ public class PdfConversionService implements IPdfConversionService {
         }
     }
 
+    @Override
+    public Resource ocr(MultipartFile file, String targetFormat) {
+        if (file.isEmpty()) {
+            throw new IllegalArgumentException("Загруженный файл пустой.");
+        }
+        String target = resolveOcrTarget(targetFormat);
+
+        Path inputFile = null;
+        Path pagesDir = null;
+        try {
+            inputFile = createTempFile("pdf-ocr-in-", ".pdf");
+            copyToFile(file, inputFile);
+            pagesDir = Files.createTempDirectory(Paths.get(tempDir), "pdf-ocr-pages-");
+            String outPrefix = pagesDir.resolve("page").toString();
+
+            List<String> rasterCommand = buildOcrRasterCommand(inputFile.toString(), outPrefix);
+            log.info("PDF OCR raster ({} bytes)", file.getSize());
+            runProcess(rasterCommand, 120, "Рендеринг PDF для OCR превысил лимит времени",
+                    "Не удалось подготовить страницы PDF для OCR");
+
+            List<Path> pages;
+            try (Stream<Path> files = Files.list(pagesDir)) {
+                pages = files.filter(Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().toLowerCase().endsWith(".jpg"))
+                        .sorted(Comparator.comparing(p -> p.getFileName().toString()))
+                        .toList();
+            }
+            if (pages.isEmpty()) {
+                throw new RuntimeException("PDF не содержит страниц для распознавания");
+            }
+
+            byte[] result = "txt".equals(target) ? ocrToText(pages) : ocrToSearchablePdf(pages, pagesDir);
+            log.info("PDF OCR done: {} pages → {} bytes", pages.size(), result.length);
+            return new ByteArrayResource(result);
+
+        } catch (IOException e) {
+            throw new RuntimeException("Ошибка при распознавании PDF: " + e.getMessage(), e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("OCR прерван", e);
+        } finally {
+            cleanupQuietly(inputFile);
+            deleteDirQuietly(pagesDir);
+        }
+    }
+
+    private byte[] ocrToText(List<Path> pages) throws IOException, InterruptedException {
+        StringBuilder combined = new StringBuilder();
+        for (int i = 0; i < pages.size(); i++) {
+            Path page = pages.get(i);
+            String outputBase = stripExtension(page.toString());
+            runProcess(buildTesseractCommand(page.toString(), outputBase, "txt"), 60,
+                    "Распознавание страницы превысило лимит времени", "Не удалось распознать текст на странице");
+            String pageText = Files.readString(Paths.get(outputBase + ".txt"), StandardCharsets.UTF_8);
+            if (i > 0) combined.append("\n\f\n");
+            combined.append(pageText.strip());
+        }
+        return combined.toString().getBytes(StandardCharsets.UTF_8);
+    }
+
+    private byte[] ocrToSearchablePdf(List<Path> pages, Path pagesDir) throws IOException, InterruptedException {
+        List<String> pagePdfs = new ArrayList<>();
+        for (Path page : pages) {
+            String outputBase = stripExtension(page.toString());
+            runProcess(buildTesseractCommand(page.toString(), outputBase, "pdf"), 60,
+                    "Распознавание страницы превысило лимит времени", "Не удалось распознать текст на странице");
+            pagePdfs.add(outputBase + ".pdf");
+        }
+        if (pagePdfs.size() == 1) {
+            return Files.readAllBytes(Paths.get(pagePdfs.get(0)));
+        }
+        Path merged = pagesDir.resolve("merged.pdf");
+        runProcess(buildMergeCommand(pagePdfs, merged.toString()), 60,
+                "Объединение распознанных страниц превысило лимит времени", "Не удалось объединить распознанные страницы");
+        return Files.readAllBytes(merged);
+    }
+
+    private void runProcess(List<String> command, int timeoutSeconds, String timeoutMessage, String failureMessage)
+            throws IOException, InterruptedException {
+        log.debug("Running command: {}", command);
+        ProcessBuilder pb = new ProcessBuilder(command);
+        pb.redirectErrorStream(true);
+        Process process = pb.start();
+        StringBuilder out = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) out.append(line).append('\n');
+        }
+        if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
+            process.destroyForcibly();
+            throw new RuntimeException(timeoutMessage);
+        }
+        if (process.exitValue() != 0) {
+            log.error("Command failed (exit {}): {}", process.exitValue(), out);
+            throw new RuntimeException(failureMessage);
+        }
+    }
+
     // ── Pure helpers (unit-tested) ──────────────────────────────────────
+
+    static String resolveOcrTarget(String targetFormat) {
+        String target = targetFormat == null ? "txt" : targetFormat.trim().toLowerCase();
+        if (!OCR_TARGET_FORMATS.contains(target)) {
+            throw new IllegalArgumentException("Unsupported OCR target format: " + targetFormat
+                    + ". Supported: " + OCR_TARGET_FORMATS);
+        }
+        return target;
+    }
+
+    static String stripExtension(String path) {
+        int dot = path.lastIndexOf('.');
+        return dot < 0 ? path : path.substring(0, dot);
+    }
+
+    // -jpeg + -r 300 for a resolution Tesseract recognizes reliably. pdftoppm
+    // pads page numbers to a consistent width based on the total page count,
+    // so lexicographic filename sorting matches page order.
+    static List<String> buildOcrRasterCommand(String input, String outPrefix) {
+        return List.of("pdftoppm", "-jpeg", "-r", "300", input, outPrefix);
+    }
+
+    // configType is "txt" (plain text output) or "pdf" (searchable PDF: the
+    // original page image with an invisible OCR text layer).
+    static List<String> buildTesseractCommand(String input, String outputBase, String configType) {
+        return List.of("tesseract", input, outputBase, "-l", "rus+eng", configType);
+    }
 
     static int resolveDpi(Integer dpi) {
         int d = dpi == null ? 150 : dpi;

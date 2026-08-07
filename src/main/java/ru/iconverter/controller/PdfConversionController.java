@@ -86,6 +86,23 @@ public class PdfConversionController {
                 .body(pdf);
     }
 
+    @PostMapping(value = "/ocr", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<?> ocr(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "targetFormat", defaultValue = "txt") String targetFormat) {
+        if (file.isEmpty()) return badRequest("Uploaded file is empty");
+        if (file.getSize() > MAX_FILE_SIZE) return badRequest("File size must not exceed 25 MB");
+
+        var result = pdfConversionService.ocr(file, targetFormat);
+        String ext = targetFormat.toLowerCase();
+        HttpHeaders headers = new HttpHeaders();
+        headers.add(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=ocr." + ext);
+        return ResponseEntity.ok()
+                .headers(headers)
+                .contentType("pdf".equals(ext) ? MediaType.APPLICATION_PDF : MediaType.TEXT_PLAIN)
+                .body(result);
+    }
+
     @PostMapping(value = "/to-jpg", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<?> toJpg(
             @RequestParam("file") MultipartFile file,

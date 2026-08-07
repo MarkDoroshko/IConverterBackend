@@ -9,7 +9,7 @@ docker compose up --build                 # local build with all CLI deps baked 
 ```
 Run a single test: `mvn test -Dtest=PdfConversionServiceTest`.
 
-Running conversions locally (outside Docker) requires ImageMagick, Ghostscript, LibreOffice, Calibre, and ffmpeg installed and on `PATH`.
+Running conversions locally (outside Docker) requires ImageMagick, Ghostscript, LibreOffice (incl. Calc/Impress), Calibre, ffmpeg, Tesseract OCR, and poppler-utils installed and on `PATH`.
 
 ### Architecture
 Each conversion domain follows the same three-layer pattern: `controller/*ConversionController.java` → `services/conversions/I*ConversionService.java` interface → `*ConversionService.java` implementation, which shells out to an external CLI tool via `ProcessBuilder` (temp file in → process → result → cleanup):
@@ -17,8 +17,10 @@ Each conversion domain follows the same three-layer pattern: `controller/*Conver
 | Domain | Endpoint prefix | Backing tool |
 |---|---|---|
 | Images | `/api/convert/images/` (+ `resize`, `crop`) | ImageMagick (`magick`) |
-| PDF | `/api/convert/pdf/` (`compress`, `merge`, `from-image`, `to-jpg`) | Ghostscript + ImageMagick |
+| PDF | `/api/convert/pdf/` (`compress`, `merge`, `from-image`, `to-jpg`, `ocr`) | Ghostscript + ImageMagick; `ocr` uses poppler (`pdftoppm`) + Tesseract (rus+eng), merging multi-page searchable-PDF output via Ghostscript |
 | Office | `/api/convert/office/` | LibreOffice (`soffice`); PDF input routes through Calibre |
+| Excel | `/api/convert/excel/` | LibreOffice Calc (`soffice`); xlsx/xls/csv ⇄, xlsx/csv→pdf. PDF as source routes to a separate best-effort path: `pdftotext -layout` + Apache POI (whitespace-column heuristic, not real table detection) |
+| PowerPoint | `/api/convert/powerpoint/` (`to-pdf`, `to-image`, `from-image`, `from-pdf`) | LibreOffice Impress (`soffice`) + Ghostscript for `to-image`; Apache POI for `from-image`/`from-pdf` (image(s)→PPTX, no CLI tool for this direction — `from-pdf` rasterizes each page via Ghostscript, then composes one slide per page, image-only/not editable text) |
 | Ebook | `/api/convert/ebook/` | Calibre (`ebook-convert`) |
 | Audio | `/api/convert/audio/` (+ `trim`) | ffmpeg |
 | Video | `/api/convert/video/` (+ `resize`, `trim`, `gif`) | ffmpeg |

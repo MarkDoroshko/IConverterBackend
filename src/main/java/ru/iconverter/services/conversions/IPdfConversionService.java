@@ -19,4 +19,9 @@ public interface IPdfConversionService {
 
     // Render every PDF page to a JPG at `dpi` and return a ZIP of the pages.
     Resource toImages(MultipartFile file, Integer dpi);
+
+    // OCR a PDF (rus+eng) via Tesseract, page by page. `targetFormat` is either
+    // "txt" (plain extracted text, pages joined) or "pdf" (a searchable PDF —
+    // original page images with an invisible text layer, merged via Ghostscript).
+    Resource ocr(MultipartFile file, String targetFormat);
 }

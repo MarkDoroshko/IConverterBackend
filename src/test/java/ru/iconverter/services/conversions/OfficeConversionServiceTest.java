@@ -33,6 +33,15 @@ class OfficeConversionServiceTest {
     }
 
     @Test
+    void validate_acceptsNonPdfOfficeFormatPairs() {
+        assertDoesNotThrow(() -> validate("docx", "odt"));
+        assertDoesNotThrow(() -> validate("odt", "rtf"));
+        assertDoesNotThrow(() -> validate("rtf", "txt"));
+        assertDoesNotThrow(() -> validate("txt", "docx"));
+        assertDoesNotThrow(() -> validate("odt", "txt"));
+    }
+
+    @Test
     void validate_rejectsPdfSource() {
         // PDF→office is handled by Calibre, not LibreOffice. The office service
         // must reject PDF input so we never silently produce an empty result.

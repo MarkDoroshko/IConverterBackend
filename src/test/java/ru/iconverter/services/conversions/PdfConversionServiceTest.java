@@ -65,4 +65,38 @@ class PdfConversionServiceTest {
         assertThat(cmd).contains("-sOutputFile=/tmp/out.pdf");
         assertThat(cmd).endsWith("/tmp/a.pdf", "/tmp/b.pdf", "/tmp/c.pdf");
     }
+
+    @Test
+    void resolveOcrTarget_defaultsToTxtAndAcceptsPdf() {
+        assertThat(resolveOcrTarget(null)).isEqualTo("txt");
+        assertThat(resolveOcrTarget("TXT")).isEqualTo("txt");
+        assertThat(resolveOcrTarget("pdf")).isEqualTo("pdf");
+    }
+
+    @Test
+    void resolveOcrTarget_rejectsUnknown() {
+        assertThatThrownBy(() -> resolveOcrTarget("docx"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void stripExtension_removesLastExtensionOnly() {
+        assertThat(stripExtension("/tmp/page-01.jpg")).isEqualTo("/tmp/page-01");
+        assertThat(stripExtension("/tmp/noext")).isEqualTo("/tmp/noext");
+    }
+
+    @Test
+    void buildOcrRasterCommand_usesJpegAt300Dpi() {
+        List<String> cmd = buildOcrRasterCommand("/tmp/in.pdf", "/tmp/page");
+        assertThat(cmd).containsExactly("pdftoppm", "-jpeg", "-r", "300", "/tmp/in.pdf", "/tmp/page");
+    }
+
+    @Test
+    void buildTesseractCommand_usesRussianAndEnglish() {
+        List<String> cmd = buildTesseractCommand("/tmp/page-01.jpg", "/tmp/page-01", "txt");
+        assertThat(cmd).containsExactly("tesseract", "/tmp/page-01.jpg", "/tmp/page-01", "-l", "rus+eng", "txt");
+
+        List<String> pdfCmd = buildTesseractCommand("/tmp/page-01.jpg", "/tmp/page-01", "pdf");
+        assertThat(pdfCmd).endsWith("pdf");
+    }
 }
