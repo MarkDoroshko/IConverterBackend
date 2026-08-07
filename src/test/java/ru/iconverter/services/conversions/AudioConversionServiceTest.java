@@ -52,6 +52,27 @@ class AudioConversionServiceTest {
     }
 
     @Test
+    void validateTimestamp_acceptsSecondsAndHms() {
+        assertThat(validateTimestamp("12.5", "startTime", null)).isEqualTo("12.5");
+        assertThat(validateTimestamp("00:01:30", "endTime", null)).isEqualTo("00:01:30");
+        assertThat(validateTimestamp(null, "startTime", "0")).isEqualTo("0");
+    }
+
+    @Test
+    void validateTimestamp_rejectsInvalidAndMissingRequired() {
+        assertThatThrownBy(() -> validateTimestamp("abc", "startTime", null))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> validateTimestamp(null, "endTime", null))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void buildTrimCommand_usesStreamCopy() {
+        assertThat(buildTrimCommand("/i.mp3", "/o.mp3", "0", "10"))
+                .containsExactly("ffmpeg", "-y", "-i", "/i.mp3", "-ss", "0", "-to", "10", "-c", "copy", "/o.mp3");
+    }
+
+    @Test
     void noAudioStream_detectsFfmpegMessages() {
         assertThat(noAudioStream("Output file #0 does not contain any stream")).isTrue();
         assertThat(noAudioStream("Stream map '0:a' matches no streams.")).isTrue();

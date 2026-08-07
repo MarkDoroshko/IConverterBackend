@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 @Service
 public class AudioConversionService implements IAudioConversionService {
@@ -35,8 +36,69 @@ public class AudioConversionService implements IAudioConversionService {
             "mp4", "m4v", "mov", "mkv", "avi", "webm", "flv", "wmv", "3gp", "ts",
             "mp3", "wav", "aac", "m4a", "ogg", "oga", "flac", "wma", "opus", "aiff");
 
+    // Accepts plain seconds ("12.5") or HH:MM:SS(.ms) — both valid ffmpeg -ss/-to values.
+    private static final Pattern TIMESTAMP = Pattern.compile("^\\d+(\\.\\d+)?$|^\\d{1,2}:\\d{2}:\\d{2}(\\.\\d+)?$");
+
     @Value("${app.temp-dir:/tmp}")
     private String tempDir;
+
+    @Override
+    public Resource trim(MultipartFile file, String startTime, String endTime) {
+        if (file.isEmpty()) {
+            throw new IllegalArgumentException("Загруженный файл пустой.");
+        }
+        String source = normalize(getExtension(file.getOriginalFilename()));
+        if (!SUPPORTED_SOURCE_FORMATS.contains(source)) {
+            throw new IllegalArgumentException("Unsupported source format: " + source
+                    + ". Supported: " + SUPPORTED_SOURCE_FORMATS);
+        }
+        String start = validateTimestamp(startTime, "startTime", "0");
+        String end = validateTimestamp(endTime, "endTime", null);
+
+        Path inputFile = null;
+        Path outputFile = null;
+        try {
+            inputFile = createTempFile("audio-in-", source.isEmpty() ? ".bin" : "." + source);
+            outputFile = createTempFile("audio-out-", "." + source);
+            try (InputStream in = file.getInputStream()) {
+                Files.copy(in, inputFile, StandardCopyOption.REPLACE_EXISTING);
+            }
+
+            List<String> command = buildTrimCommand(inputFile.toString(), outputFile.toString(), start, end);
+            log.info("Audio trim {} [{} → {}] ({} bytes)", source, start, end, file.getSize());
+            log.debug("ffmpeg command: {}", command);
+
+            ProcessBuilder pb = new ProcessBuilder(command);
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
+            StringBuilder output = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) output.append(line).append('\n');
+            }
+            if (!process.waitFor(120, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                throw new RuntimeException("Обрезка аудио превысила лимит времени");
+            }
+            if (process.exitValue() != 0) {
+                log.error("ffmpeg failed (exit {}): {}", process.exitValue(), output);
+                throw new RuntimeException("Не удалось обрезать аудио");
+            }
+
+            byte[] bytes = Files.readAllBytes(outputFile);
+            log.info("Audio trim done: {} → {} bytes", source, bytes.length);
+            return new ByteArrayResource(bytes);
+
+        } catch (IOException e) {
+            throw new RuntimeException("Ошибка при обработке аудио: " + e.getMessage(), e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Обрезка прервана", e);
+        } finally {
+            cleanupQuietly(inputFile);
+            cleanupQuietly(outputFile);
+        }
+    }
 
     @Override
     public Resource convert(MultipartFile file, String targetFormat) {
@@ -117,6 +179,26 @@ public class AudioConversionService implements IAudioConversionService {
         return s.contains("does not contain any stream")
                 || s.contains("matches no streams")
                 || s.contains("output file does not contain any stream");
+    }
+
+    static String validateTimestamp(String value, String paramName, String defaultValue) {
+        if (value == null || value.isBlank()) {
+            if (defaultValue != null) return defaultValue;
+            throw new IllegalArgumentException(paramName + " is required");
+        }
+        String trimmed = value.trim();
+        if (!TIMESTAMP.matcher(trimmed).matches()) {
+            throw new IllegalArgumentException("Invalid " + paramName + ": " + value
+                    + ". Use seconds (e.g. 12.5) or HH:MM:SS");
+        }
+        return trimmed;
+    }
+
+    // Output-seeking trim (accurate) with stream copy (fast, no re-encode).
+    static List<String> buildTrimCommand(String input, String output, String start, String end) {
+        return List.of("ffmpeg", "-y", "-i", input,
+                "-ss", start, "-to", end,
+                "-c", "copy", output);
     }
 
     static void validate(String source, String target) {
