@@ -283,19 +283,45 @@ public class ImagesConversionService implements IImagesConversionService {
     @Override
     public ByteArrayResource removeBackground(MultipartFile file) throws IOException {
         logger.info("Background removal, input {} bytes", file.getSize());
-        byte[] result = callRembgServer(file);
+        byte[] downscaled = downscaleForBackgroundRemoval(file);
+        byte[] result = callRembgServer(downscaled);
         logger.info("Background removal completed. Output size: {} bytes", result.length);
         return new ByteArrayResource(result);
     }
 
-    // Calls the long-lived `rembg s` sidecar process (started alongside the JVM in the
-    // container entrypoint) instead of shelling out per request: shelling out would reload
-    // the ~176MB ONNX model and re-init onnxruntime on every single call, which is what made
-    // the original per-request implementation time out. One retry covers the narrow window
+    // rembg's memory use scales with pixel count, and the production host is tight on RAM
+    // (shared VPS, ~1.9GB total). A full-resolution 20MP camera photo pushed the sidecar past
+    // 1GB RSS and got OOM-killed mid-request. Cap the longest side before handing off — plenty
+    // for any realistic use of a cutout (web, social, product photos) and keeps memory bounded.
+    private static final int MAX_BACKGROUND_REMOVAL_DIMENSION = 1600;
+
+    private byte[] downscaleForBackgroundRemoval(MultipartFile file) throws IOException {
+        String srcExt = getExtension(file.getOriginalFilename());
+        Path inputFile = null;
+        Path outputFile = null;
+        try {
+            inputFile = createTempFile("bgremove-in-", srcExt.isEmpty() ? ".bin" : "." + srcExt);
+            outputFile = createTempFile("bgremove-resized-", ".png");
+            try (InputStream in = file.getInputStream()) {
+                Files.copy(in, inputFile, StandardCopyOption.REPLACE_EXISTING);
+            }
+            runProcess(buildBackgroundRemovalResizeCommand(inputFile.toString(), outputFile.toString()),
+                    "Background removal preprocessing");
+            return Files.readAllBytes(outputFile);
+        } finally {
+            cleanupQuietly(inputFile);
+            cleanupQuietly(outputFile);
+        }
+    }
+
+    // Calls the long-lived rembg sidecar process (docker/rembg_server.py, started alongside the
+    // JVM in the container entrypoint) instead of shelling out per request: shelling out would
+    // reload the ~176MB ONNX model and re-init onnxruntime on every single call, which is what
+    // made the original per-request implementation time out. One retry covers the narrow window
     // right after container startup where the sidecar may not have finished loading yet.
-    private byte[] callRembgServer(MultipartFile file) throws IOException {
+    private byte[] callRembgServer(byte[] imageBytes) throws IOException {
         RestTemplate restTemplate = buildRembgRestTemplate();
-        HttpEntity<MultiValueMap<String, Object>> request = buildRembgRequest(file);
+        HttpEntity<MultiValueMap<String, Object>> request = buildRembgRequest(imageBytes);
         for (int attempt = 1; attempt <= 2; attempt++) {
             try {
                 ResponseEntity<byte[]> response = restTemplate.postForEntity(REMBG_SERVER_URL, request, byte[].class);
@@ -316,13 +342,11 @@ public class ImagesConversionService implements IImagesConversionService {
         throw new IOException("Background removal failed"); // unreachable
     }
 
-    private HttpEntity<MultiValueMap<String, Object>> buildRembgRequest(MultipartFile file) throws IOException {
-        String ext = getExtension(file.getOriginalFilename());
-        String filename = "image." + (ext.isEmpty() ? "png" : ext);
-        ByteArrayResource fileResource = new ByteArrayResource(file.getBytes()) {
+    private HttpEntity<MultiValueMap<String, Object>> buildRembgRequest(byte[] imageBytes) {
+        ByteArrayResource fileResource = new ByteArrayResource(imageBytes) {
             @Override
             public String getFilename() {
-                return filename;
+                return "image.png";
             }
         };
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
@@ -545,6 +569,12 @@ public class ImagesConversionService implements IImagesConversionService {
 
     static List<String> buildCwebpCommand(String input, String output, int quality) {
         return List.of("cwebp", "-q", String.valueOf(quality), input, "-o", output);
+    }
+
+    // magick <input> -resize <N>x<N>> png:<output> — only shrinks, never enlarges.
+    static List<String> buildBackgroundRemovalResizeCommand(String input, String output) {
+        String geometry = MAX_BACKGROUND_REMOVAL_DIMENSION + "x" + MAX_BACKGROUND_REMOVAL_DIMENSION + ">";
+        return List.of("magick", input, "-resize", geometry, "png:" + output);
     }
 
     // Run `magick <input> <ops...> <ext>:<output>` and return the bytes.

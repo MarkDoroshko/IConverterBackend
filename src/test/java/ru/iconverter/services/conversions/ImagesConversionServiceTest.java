@@ -222,4 +222,10 @@ class ImagesConversionServiceTest {
         assertThat(buildCwebpCommand("/in.webp", "/out.webp", 60))
                 .containsExactly("cwebp", "-q", "60", "/in.webp", "-o", "/out.webp");
     }
+
+    @Test
+    void buildBackgroundRemovalResizeCommand_capsAt1600_onlyShrinks() {
+        assertThat(buildBackgroundRemovalResizeCommand("/in.jpg", "/out.png"))
+                .containsExactly("magick", "/in.jpg", "-resize", "1600x1600>", "png:/out.png");
+    }
 }
