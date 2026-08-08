@@ -36,4 +36,8 @@ public interface IImagesConversionService {
     // gifsicle/cwebp) — smaller output than ImageMagick's -quality alone. Keeps
     // the original format. quality: 1..100, higher = larger/better (default 80).
     ByteArrayResource optimize(MultipartFile file, Integer quality) throws IOException;
+
+    // AI background removal (rembg / U^2-Net). Always returns PNG with a
+    // transparent background, regardless of input format.
+    ByteArrayResource removeBackground(MultipartFile file) throws IOException;
 }

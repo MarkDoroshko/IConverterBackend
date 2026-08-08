@@ -59,6 +59,10 @@ public class ImagesConversionService implements IImagesConversionService {
     static final Set<String> OPTIMIZABLE_FORMATS = Set.of("jpg", "jpeg", "png", "gif", "webp");
     private static final int DEFAULT_OPTIMIZE_QUALITY = 80;
 
+    // ML inference is slower than the ImageMagick/CLI ops elsewhere in this class.
+    private static final int BACKGROUND_REMOVAL_TIMEOUT_SECONDS = 90;
+    private static final int DEFAULT_TIMEOUT_SECONDS = 30;
+
     @Value("${app.temp-dir:/tmp}")
     private String tempDir;
 
@@ -254,6 +258,29 @@ public class ImagesConversionService implements IImagesConversionService {
             runProcess(command, "Image optimization");
             byte[] result = Files.readAllBytes(outputFile);
             logger.info("Optimization completed. Input {} bytes, output {} bytes", file.getSize(), result.length);
+            return new ByteArrayResource(result);
+        } finally {
+            cleanupQuietly(inputFile);
+            cleanupQuietly(outputFile);
+        }
+    }
+
+    @Override
+    public ByteArrayResource removeBackground(MultipartFile file) throws IOException {
+        logger.info("Background removal, input {} bytes", file.getSize());
+        String srcExt = getExtension(file.getOriginalFilename());
+        Path inputFile = null;
+        Path outputFile = null;
+        try {
+            inputFile = createTempFile("bgremove-in-", srcExt.isEmpty() ? ".bin" : "." + srcExt);
+            outputFile = createTempFile("bgremove-out-", ".png");
+            try (InputStream in = file.getInputStream()) {
+                Files.copy(in, inputFile, StandardCopyOption.REPLACE_EXISTING);
+            }
+            runProcess(buildRembgCommand(inputFile.toString(), outputFile.toString()),
+                    "Background removal", BACKGROUND_REMOVAL_TIMEOUT_SECONDS);
+            byte[] result = Files.readAllBytes(outputFile);
+            logger.info("Background removal completed. Output size: {} bytes", result.length);
             return new ByteArrayResource(result);
         } finally {
             cleanupQuietly(inputFile);
@@ -461,6 +488,10 @@ public class ImagesConversionService implements IImagesConversionService {
         return List.of("cwebp", "-q", String.valueOf(quality), input, "-o", output);
     }
 
+    static List<String> buildRembgCommand(String input, String output) {
+        return List.of("rembg", "i", input, output);
+    }
+
     // Run `magick <input> <ops...> <ext>:<output>` and return the bytes.
     private ByteArrayResource runMagick(MultipartFile file, String ext, List<String> ops) throws IOException {
         Path inputFile = null;
@@ -508,6 +539,10 @@ public class ImagesConversionService implements IImagesConversionService {
 
     // Run an arbitrary ImageMagick command and wait for it; throws IOException on failure/timeout.
     private void runProcess(List<String> command, String opName) throws IOException {
+        runProcess(command, opName, DEFAULT_TIMEOUT_SECONDS);
+    }
+
+    private void runProcess(List<String> command, String opName, int timeoutSeconds) throws IOException {
         logger.debug("ImageMagick command: {}", command);
         ProcessBuilder pb = new ProcessBuilder(command);
         pb.redirectErrorStream(true);
@@ -519,7 +554,7 @@ public class ImagesConversionService implements IImagesConversionService {
                 String line;
                 while ((line = reader.readLine()) != null) output.append(line).append('\n');
             }
-            if (!process.waitFor(30, TimeUnit.SECONDS)) {
+            if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
                 process.destroyForcibly();
                 throw new IOException(opName + " timed out");
             }

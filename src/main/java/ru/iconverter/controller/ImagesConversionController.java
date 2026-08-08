@@ -148,6 +148,17 @@ public class ImagesConversionController {
                 .body((Resource) resource);
     }
 
+    @PostMapping(value = "/remove-background")
+    public ResponseEntity<?> removeBackground(@RequestParam("file") MultipartFile file) throws IOException {
+        ResponseEntity<?> bad = validate(file);
+        if (bad != null) return bad;
+
+        var resource = imagesConversionService.removeBackground(file);
+        return ResponseEntity.ok()
+                .contentType(mediaTypeService.getMediaType("png"))
+                .body((Resource) resource);
+    }
+
     // Output keeps the input format; derive content type from the file extension.
     private MediaType mediaTypeFor(MultipartFile file) {
         String name = file.getOriginalFilename();

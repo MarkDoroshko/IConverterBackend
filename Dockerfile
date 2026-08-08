@@ -33,6 +33,8 @@ RUN apt-get update \
       pngquant \
       gifsicle \
       webp \
+      python3 \
+      python3-pip \
       ffmpeg \
       libwebp-dev \
       libheif1 \
@@ -62,6 +64,17 @@ RUN sed -i -E \
       -e '/<policy domain="(coder|filter|delegate)" rights="none" pattern="\*"/d' \
       -e '/<policy domain="coder" rights="none" pattern="[^"]*(PDF|PS|EPS|XPS)[^"]*"/d' \
       /etc/ImageMagick-6/policy.xml
+
+# rembg: AI background removal (U^2-Net ONNX model, CPU inference via
+# onnxruntime). The model is pre-downloaded into U2NET_HOME at build time so
+# the image is fully self-contained and the first request doesn't pay
+# download latency; the directory is left world-readable since it's
+# populated as root, before the non-root "app" user below is switched to.
+RUN pip3 install --no-cache-dir rembg onnxruntime
+ENV U2NET_HOME=/opt/rembg-models
+RUN mkdir -p /opt/rembg-models \
+ && python3 -c "from rembg import new_session; new_session('u2net')" \
+ && chmod -R a+rX /opt/rembg-models
 
 # Non-root runtime user
 RUN useradd -u 1000 -m -s /bin/bash app
