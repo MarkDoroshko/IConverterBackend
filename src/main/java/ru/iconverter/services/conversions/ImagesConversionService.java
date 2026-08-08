@@ -4,7 +4,17 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.BufferedReader;
@@ -62,6 +72,11 @@ public class ImagesConversionService implements IImagesConversionService {
     // ML inference is slower than the ImageMagick/CLI ops elsewhere in this class.
     private static final int BACKGROUND_REMOVAL_TIMEOUT_SECONDS = 90;
     private static final int DEFAULT_TIMEOUT_SECONDS = 30;
+
+    // `rembg s` sidecar, started alongside the JVM in the container entrypoint (see Dockerfile).
+    private static final String REMBG_SERVER_URL = "http://127.0.0.1:5000/api/remove";
+    private static final int REMBG_CONNECT_TIMEOUT_MS = 5000;
+    private static final long REMBG_RETRY_DELAY_MS = 3000;
 
     @Value("${app.temp-dir:/tmp}")
     private String tempDir;
@@ -268,23 +283,67 @@ public class ImagesConversionService implements IImagesConversionService {
     @Override
     public ByteArrayResource removeBackground(MultipartFile file) throws IOException {
         logger.info("Background removal, input {} bytes", file.getSize());
-        String srcExt = getExtension(file.getOriginalFilename());
-        Path inputFile = null;
-        Path outputFile = null;
-        try {
-            inputFile = createTempFile("bgremove-in-", srcExt.isEmpty() ? ".bin" : "." + srcExt);
-            outputFile = createTempFile("bgremove-out-", ".png");
-            try (InputStream in = file.getInputStream()) {
-                Files.copy(in, inputFile, StandardCopyOption.REPLACE_EXISTING);
+        byte[] result = callRembgServer(file);
+        logger.info("Background removal completed. Output size: {} bytes", result.length);
+        return new ByteArrayResource(result);
+    }
+
+    // Calls the long-lived `rembg s` sidecar process (started alongside the JVM in the
+    // container entrypoint) instead of shelling out per request: shelling out would reload
+    // the ~176MB ONNX model and re-init onnxruntime on every single call, which is what made
+    // the original per-request implementation time out. One retry covers the narrow window
+    // right after container startup where the sidecar may not have finished loading yet.
+    private byte[] callRembgServer(MultipartFile file) throws IOException {
+        RestTemplate restTemplate = buildRembgRestTemplate();
+        HttpEntity<MultiValueMap<String, Object>> request = buildRembgRequest(file);
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            try {
+                ResponseEntity<byte[]> response = restTemplate.postForEntity(REMBG_SERVER_URL, request, byte[].class);
+                if (response.getBody() == null) {
+                    throw new IOException("Background removal returned an empty response");
+                }
+                return response.getBody();
+            } catch (ResourceAccessException e) {
+                if (attempt == 2) {
+                    throw new IOException("Background removal service unavailable: " + e.getMessage(), e);
+                }
+                logger.warn("rembg server not reachable yet (likely still starting up), retrying: {}", e.getMessage());
+                sleepQuietly(REMBG_RETRY_DELAY_MS);
+            } catch (RestClientException e) {
+                throw new IOException("Background removal failed: " + e.getMessage(), e);
             }
-            runProcess(buildRembgCommand(inputFile.toString(), outputFile.toString()),
-                    "Background removal", BACKGROUND_REMOVAL_TIMEOUT_SECONDS);
-            byte[] result = Files.readAllBytes(outputFile);
-            logger.info("Background removal completed. Output size: {} bytes", result.length);
-            return new ByteArrayResource(result);
-        } finally {
-            cleanupQuietly(inputFile);
-            cleanupQuietly(outputFile);
+        }
+        throw new IOException("Background removal failed"); // unreachable
+    }
+
+    private HttpEntity<MultiValueMap<String, Object>> buildRembgRequest(MultipartFile file) throws IOException {
+        String ext = getExtension(file.getOriginalFilename());
+        String filename = "image." + (ext.isEmpty() ? "png" : ext);
+        ByteArrayResource fileResource = new ByteArrayResource(file.getBytes()) {
+            @Override
+            public String getFilename() {
+                return filename;
+            }
+        };
+        MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+        body.add("file", fileResource);
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+        return new HttpEntity<>(body, headers);
+    }
+
+    private RestTemplate buildRembgRestTemplate() {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(REMBG_CONNECT_TIMEOUT_MS);
+        factory.setReadTimeout(BACKGROUND_REMOVAL_TIMEOUT_SECONDS * 1000);
+        return new RestTemplate(factory);
+    }
+
+    private void sleepQuietly(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -486,10 +545,6 @@ public class ImagesConversionService implements IImagesConversionService {
 
     static List<String> buildCwebpCommand(String input, String output, int quality) {
         return List.of("cwebp", "-q", String.valueOf(quality), input, "-o", output);
-    }
-
-    static List<String> buildRembgCommand(String input, String output) {
-        return List.of("rembg", "i", input, output);
     }
 
     // Run `magick <input> <ops...> <ext>:<output>` and return the bytes.

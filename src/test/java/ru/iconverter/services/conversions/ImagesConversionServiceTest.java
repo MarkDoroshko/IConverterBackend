@@ -222,12 +222,4 @@ class ImagesConversionServiceTest {
         assertThat(buildCwebpCommand("/in.webp", "/out.webp", 60))
                 .containsExactly("cwebp", "-q", "60", "/in.webp", "-o", "/out.webp");
     }
-
-    // ── background removal ──────────────────────────────────────────────
-
-    @Test
-    void buildRembgCommand_buildsSingleImageInvocation() {
-        assertThat(buildRembgCommand("/in.jpg", "/out.png"))
-                .containsExactly("rembg", "i", "/in.jpg", "/out.png");
-    }
 }
