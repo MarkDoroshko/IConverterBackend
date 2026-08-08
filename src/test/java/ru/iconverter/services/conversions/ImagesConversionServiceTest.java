@@ -224,8 +224,8 @@ class ImagesConversionServiceTest {
     }
 
     @Test
-    void buildBackgroundRemovalResizeCommand_capsAt1600_onlyShrinks() {
+    void buildBackgroundRemovalResizeCommand_capsAt1000_onlyShrinks() {
         assertThat(buildBackgroundRemovalResizeCommand("/in.jpg", "/out.png"))
-                .containsExactly("magick", "/in.jpg", "-resize", "1600x1600>", "png:/out.png");
+                .containsExactly("magick", "/in.jpg", "-resize", "1000x1000>", "png:/out.png");
     }
 }

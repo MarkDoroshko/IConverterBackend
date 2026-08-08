@@ -65,16 +65,19 @@ RUN sed -i -E \
       -e '/<policy domain="coder" rights="none" pattern="[^"]*(PDF|PS|EPS|XPS)[^"]*"/d' \
       /etc/ImageMagick-6/policy.xml
 
-# rembg: AI background removal (U^2-Net ONNX model, CPU inference via
-# onnxruntime), served by docker/rembg_server.py — a ~15-line FastAPI wrapper
-# run as a long-lived sidecar (see ENTRYPOINT) so the model stays loaded in
-# memory across requests, instead of a fresh CLI process per request
-# reloading the ~176MB model and re-initializing onnxruntime every time
+# rembg: AI background removal (U^2-Net-portable ONNX model, CPU inference
+# via onnxruntime), served by docker/rembg_server.py — a small FastAPI
+# wrapper run as a long-lived sidecar (see ENTRYPOINT) so the model stays
+# loaded in memory across requests, instead of a fresh CLI process per
+# request reloading the model and re-initializing onnxruntime every time
 # (what made the original implementation too slow). Deliberately NOT using
 # rembg's own `rembg s` CLI server: it pulls in the "cli" extra's full
 # dependency tree (gradio, watchdog, aiohttp, ...) since rembg's CLI eagerly
 # imports every subcommand — memory-heavy enough to fail to start on the
-# production VPS. Importing the library directly avoids all of that. The
+# production VPS. Importing the library directly avoids all of that. Uses
+# the "u2netp" model (see rembg_server.py) rather than the default "u2net" —
+# the production host is a ~1.9GB shared VPS, and u2net's own footprint was
+# still enough to get OOM-killed even after capping input resolution. The
 # model is pre-downloaded into U2NET_HOME at build time so the image is
 # fully self-contained and startup doesn't pay download latency; the
 # directory is left world-readable since it's populated as root, before the
@@ -83,7 +86,7 @@ RUN pip3 install --no-cache-dir rembg onnxruntime fastapi uvicorn python-multipa
 COPY docker/rembg_server.py /opt/rembg-server/rembg_server.py
 ENV U2NET_HOME=/opt/rembg-models
 RUN mkdir -p /opt/rembg-models \
- && python3 -c "from rembg import new_session; new_session('u2net')" \
+ && python3 -c "from rembg import new_session; new_session('u2netp')" \
  && chmod -R a+rX /opt/rembg-models
 
 # Non-root runtime user

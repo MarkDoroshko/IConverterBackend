@@ -290,10 +290,13 @@ public class ImagesConversionService implements IImagesConversionService {
     }
 
     // rembg's memory use scales with pixel count, and the production host is tight on RAM
-    // (shared VPS, ~1.9GB total). A full-resolution 20MP camera photo pushed the sidecar past
-    // 1GB RSS and got OOM-killed mid-request. Cap the longest side before handing off — plenty
-    // for any realistic use of a cutout (web, social, product photos) and keeps memory bounded.
-    private static final int MAX_BACKGROUND_REMOVAL_DIMENSION = 1600;
+    // (shared VPS, ~1.9GB total, a dozen other containers already running). A full-resolution
+    // 20MP camera photo pushed the sidecar past 1GB RSS and got OOM-killed mid-request — and
+    // even after capping at 1600px it still got OOM-killed once more, since actual free memory
+    // on the box fluctuates with what else is running at the time. 1000px is conservative but
+    // still plenty for realistic cutout use (web, social, product photos) and leaves real
+    // headroom instead of sitting right at the edge of what's available.
+    private static final int MAX_BACKGROUND_REMOVAL_DIMENSION = 1000;
 
     private byte[] downscaleForBackgroundRemoval(MultipartFile file) throws IOException {
         String srcExt = getExtension(file.getOriginalFilename());

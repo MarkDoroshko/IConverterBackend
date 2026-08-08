@@ -10,12 +10,19 @@
 # sidecar fail to start. Importing the library directly (`from rembg import
 # remove, new_session`) never touches rembg.cli, so none of that is pulled
 # in -- just rembg + onnxruntime + fastapi/uvicorn/python-multipart.
+#
+# Uses "u2netp" (the small/portable U^2-Net variant, ~4.7MB of weights vs.
+# u2net's 176MB) rather than the default "u2net": the production host is a
+# ~1.9GB shared VPS with a dozen other containers already running, and even
+# after capping input resolution, u2net's own memory footprint alone was
+# still enough to get OOM-killed. u2netp trades some cutout accuracy for a
+# meaningfully smaller footprint -- necessary here, not optional.
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import Response
 from rembg import remove, new_session
 
 app = FastAPI()
-_session = new_session("u2net")
+_session = new_session("u2netp")
 
 
 @app.post("/api/remove")
