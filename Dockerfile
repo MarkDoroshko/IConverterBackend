@@ -18,6 +18,9 @@ FROM eclipse-temurin:17-jre-jammy
 # the backend calls `magick`, so we expose a compat symlink.
 # librsvg2-bin: high-fidelity SVG delegate for ImageMagick (its built-in
 # MSVG renderer is low quality); used for SVG → PNG/JPG conversion.
+# jpegoptim/pngquant/gifsicle/webp(cwebp): dedicated lossy optimizers for
+# image compression — meaningfully smaller output than ImageMagick's
+# -quality/-strip alone, at the same visible quality.
 # libreoffice-calc/-impress: Excel/PowerPoint headless conversion.
 # tesseract-ocr(+rus): PDF OCR text extraction. poppler-utils: pdftoppm/pdftotext
 # for OCR page rasterization and layout-preserving text extraction.
@@ -26,6 +29,10 @@ RUN apt-get update \
       calibre \
       imagemagick \
       librsvg2-bin \
+      jpegoptim \
+      pngquant \
+      gifsicle \
+      webp \
       ffmpeg \
       libwebp-dev \
       libheif1 \

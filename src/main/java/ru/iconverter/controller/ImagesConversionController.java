@@ -134,6 +134,20 @@ public class ImagesConversionController {
                 .body((Resource) resource);
     }
 
+    @PostMapping(value = "/optimize")
+    public ResponseEntity<?> optimize(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "quality", required = false) Integer quality) throws IOException {
+
+        ResponseEntity<?> bad = validate(file);
+        if (bad != null) return bad;
+
+        var resource = imagesConversionService.optimize(file, quality);
+        return ResponseEntity.ok()
+                .contentType(mediaTypeFor(file))
+                .body((Resource) resource);
+    }
+
     // Output keeps the input format; derive content type from the file extension.
     private MediaType mediaTypeFor(MultipartFile file) {
         String name = file.getOriginalFilename();

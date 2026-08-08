@@ -31,4 +31,9 @@ public interface IImagesConversionService {
     // Exactly one of watermarkImage/text must be provided.
     ByteArrayResource watermark(MultipartFile file, MultipartFile watermarkImage, String text,
                                String gravity, Integer opacity, Integer fontSize) throws IOException;
+
+    // Lossy size optimization via a dedicated per-format tool (jpegoptim/pngquant/
+    // gifsicle/cwebp) — smaller output than ImageMagick's -quality alone. Keeps
+    // the original format. quality: 1..100, higher = larger/better (default 80).
+    ByteArrayResource optimize(MultipartFile file, Integer quality) throws IOException;
 }

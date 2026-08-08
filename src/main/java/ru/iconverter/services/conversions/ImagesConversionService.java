@@ -56,6 +56,9 @@ public class ImagesConversionService implements IImagesConversionService {
     private static final int DEFAULT_FONT_SIZE = 36;
     private static final String DEFAULT_WATERMARK_GRAVITY = "southeast";
 
+    static final Set<String> OPTIMIZABLE_FORMATS = Set.of("jpg", "jpeg", "png", "gif", "webp");
+    private static final int DEFAULT_OPTIMIZE_QUALITY = 80;
+
     @Value("${app.temp-dir:/tmp}")
     private String tempDir;
 
@@ -213,6 +216,47 @@ public class ImagesConversionService implements IImagesConversionService {
         } finally {
             cleanupQuietly(inputFile);
             cleanupQuietly(watermarkFile);
+            cleanupQuietly(outputFile);
+        }
+    }
+
+    @Override
+    public ByteArrayResource optimize(MultipartFile file, Integer quality) throws IOException {
+        String ext = outputExt(file);
+        validateOptimizableFormat(ext);
+        int q = quality == null ? DEFAULT_OPTIMIZE_QUALITY : quality;
+        if (q < MIN_QUALITY || q > MAX_QUALITY) {
+            throw new IllegalArgumentException("quality must be " + MIN_QUALITY + ".." + MAX_QUALITY);
+        }
+        logger.info("Image optimize ({}) quality={}, input {} bytes", ext, q, file.getSize());
+
+        Path inputFile = null;
+        Path outputFile = null;
+        try {
+            inputFile = createTempFile("opt-in-", "." + ext);
+            outputFile = createTempFile("opt-out-", "." + ext);
+            try (InputStream in = file.getInputStream()) {
+                Files.copy(in, inputFile, StandardCopyOption.REPLACE_EXISTING);
+            }
+
+            List<String> command;
+            if (ext.equals("jpg") || ext.equals("jpeg")) {
+                // jpegoptim rewrites its argument in place, so seed the output path first.
+                Files.copy(inputFile, outputFile, StandardCopyOption.REPLACE_EXISTING);
+                command = buildJpegoptimCommand(outputFile.toString(), q);
+            } else if (ext.equals("png")) {
+                command = buildPngquantCommand(inputFile.toString(), outputFile.toString(), q);
+            } else if (ext.equals("gif")) {
+                command = buildGifsicleCommand(inputFile.toString(), outputFile.toString(), q);
+            } else {
+                command = buildCwebpCommand(inputFile.toString(), outputFile.toString(), q);
+            }
+            runProcess(command, "Image optimization");
+            byte[] result = Files.readAllBytes(outputFile);
+            logger.info("Optimization completed. Input {} bytes, output {} bytes", file.getSize(), result.length);
+            return new ByteArrayResource(result);
+        } finally {
+            cleanupQuietly(inputFile);
             cleanupQuietly(outputFile);
         }
     }
@@ -387,6 +431,34 @@ public class ImagesConversionService implements IImagesConversionService {
                 "-pointsize", String.valueOf(fontSize),
                 "-annotate", "+20+20", text,
                 output);
+    }
+
+    static void validateOptimizableFormat(String ext) {
+        if (!OPTIMIZABLE_FORMATS.contains(ext)) {
+            throw new IllegalArgumentException("Unsupported format for optimization: " + ext
+                    + ". Supported: " + OPTIMIZABLE_FORMATS);
+        }
+    }
+
+    // jpegoptim rewrites <path> in place.
+    static List<String> buildJpegoptimCommand(String path, int quality) {
+        return List.of("jpegoptim", "--max=" + quality, "--strip-all", path);
+    }
+
+    // pngquant picks its own palette within the quality range; low bound 0 lets
+    // it use as few colors as needed to hit the target (upper bound) quality.
+    static List<String> buildPngquantCommand(String input, String output, int quality) {
+        return List.of("pngquant", "--quality=0-" + quality, "--strip", "--force", "--output", output, input);
+    }
+
+    // gifsicle's --lossy scale runs the opposite way from "quality": higher = more compression.
+    static List<String> buildGifsicleCommand(String input, String output, int quality) {
+        int lossy = MAX_QUALITY - quality;
+        return List.of("gifsicle", "-O3", "--lossy=" + lossy, "-o", output, input);
+    }
+
+    static List<String> buildCwebpCommand(String input, String output, int quality) {
+        return List.of("cwebp", "-q", String.valueOf(quality), input, "-o", output);
     }
 
     // Run `magick <input> <ops...> <ext>:<output>` and return the bytes.

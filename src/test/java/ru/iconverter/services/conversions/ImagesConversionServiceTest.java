@@ -181,4 +181,45 @@ class ImagesConversionServiceTest {
                         "-gravity", "North", "-fill", "rgba(255,255,255,0.25)",
                         "-pointsize", "20", "-annotate", "+20+20", "Hello", "/out.png");
     }
+
+    // ── optimize ─────────────────────────────────────────────────────────
+
+    @Test
+    void validateOptimizableFormat_acceptsSupported() {
+        for (String f : List.of("jpg", "jpeg", "png", "gif", "webp")) {
+            validateOptimizableFormat(f); // should not throw
+        }
+    }
+
+    @Test
+    void validateOptimizableFormat_rejectsUnsupported() {
+        assertThatThrownBy(() -> validateOptimizableFormat("bmp")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> validateOptimizableFormat("tiff")).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void buildJpegoptimCommand_rewritesInPlace() {
+        assertThat(buildJpegoptimCommand("/photo.jpg", 75))
+                .containsExactly("jpegoptim", "--max=75", "--strip-all", "/photo.jpg");
+    }
+
+    @Test
+    void buildPngquantCommand_capsQualityRange() {
+        assertThat(buildPngquantCommand("/in.png", "/out.png", 80))
+                .containsExactly("pngquant", "--quality=0-80", "--strip", "--force", "--output", "/out.png", "/in.png");
+    }
+
+    @Test
+    void buildGifsicleCommand_invertsQualityToLossyLevel() {
+        assertThat(buildGifsicleCommand("/in.gif", "/out.gif", 80))
+                .containsExactly("gifsicle", "-O3", "--lossy=20", "-o", "/out.gif", "/in.gif");
+        assertThat(buildGifsicleCommand("/in.gif", "/out.gif", 100))
+                .containsExactly("gifsicle", "-O3", "--lossy=0", "-o", "/out.gif", "/in.gif");
+    }
+
+    @Test
+    void buildCwebpCommand_passesQualityDirectly() {
+        assertThat(buildCwebpCommand("/in.webp", "/out.webp", 60))
+                .containsExactly("cwebp", "-q", "60", "/in.webp", "-o", "/out.webp");
+    }
 }
