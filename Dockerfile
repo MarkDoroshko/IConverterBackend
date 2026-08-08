@@ -16,6 +16,8 @@ FROM eclipse-temurin:17-jre-jammy
 
 # Calibre (ebook-convert) + ImageMagick. ImageMagick 6 ships `convert`;
 # the backend calls `magick`, so we expose a compat symlink.
+# librsvg2-bin: high-fidelity SVG delegate for ImageMagick (its built-in
+# MSVG renderer is low quality); used for SVG → PNG/JPG conversion.
 # libreoffice-calc/-impress: Excel/PowerPoint headless conversion.
 # tesseract-ocr(+rus): PDF OCR text extraction. poppler-utils: pdftoppm/pdftotext
 # for OCR page rasterization and layout-preserving text extraction.
@@ -23,6 +25,7 @@ RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       calibre \
       imagemagick \
+      librsvg2-bin \
       ffmpeg \
       libwebp-dev \
       libheif1 \

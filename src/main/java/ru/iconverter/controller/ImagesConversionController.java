@@ -87,6 +87,53 @@ public class ImagesConversionController {
                 .body((Resource) resource);
     }
 
+    @PostMapping(value = "/favicon")
+    public ResponseEntity<?> favicon(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "sizes", required = false) String sizes) throws IOException {
+
+        ResponseEntity<?> bad = validate(file);
+        if (bad != null) return bad;
+
+        var resource = imagesConversionService.favicon(file, sizes);
+        return ResponseEntity.ok()
+                .contentType(mediaTypeService.getMediaType("ico"))
+                .header("Content-Disposition", "attachment; filename=\"favicon.ico\"")
+                .body((Resource) resource);
+    }
+
+    @PostMapping(value = "/filter")
+    public ResponseEntity<?> filter(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam("filter") String filter) throws IOException {
+
+        ResponseEntity<?> bad = validate(file);
+        if (bad != null) return bad;
+
+        var resource = imagesConversionService.filter(file, filter);
+        return ResponseEntity.ok()
+                .contentType(mediaTypeFor(file))
+                .body((Resource) resource);
+    }
+
+    @PostMapping(value = "/watermark")
+    public ResponseEntity<?> watermark(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "watermark", required = false) MultipartFile watermarkImage,
+            @RequestParam(value = "text", required = false) String text,
+            @RequestParam(value = "gravity", required = false) String gravity,
+            @RequestParam(value = "opacity", required = false) Integer opacity,
+            @RequestParam(value = "fontSize", required = false) Integer fontSize) throws IOException {
+
+        ResponseEntity<?> bad = validate(file);
+        if (bad != null) return bad;
+
+        var resource = imagesConversionService.watermark(file, watermarkImage, text, gravity, opacity, fontSize);
+        return ResponseEntity.ok()
+                .contentType(mediaTypeFor(file))
+                .body((Resource) resource);
+    }
+
     // Output keeps the input format; derive content type from the file extension.
     private MediaType mediaTypeFor(MultipartFile file) {
         String name = file.getOriginalFilename();

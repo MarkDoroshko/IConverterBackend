@@ -17,8 +17,11 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 @Service
 public class ImagesConversionService implements IImagesConversionService {
@@ -33,6 +36,25 @@ public class ImagesConversionService implements IImagesConversionService {
     private static final int MIN_QUALITY = 1;
     private static final int MAX_QUALITY = 100;
     private static final int MAX_DIMENSION_LIMIT = 10000;
+
+    private static final int MIN_FAVICON_SIZE = 16;
+    private static final int MAX_FAVICON_SIZE = 512;
+    private static final List<Integer> DEFAULT_FAVICON_SIZES = List.of(16, 32, 48, 64, 128, 256);
+
+    static final Map<String, List<String>> FILTER_OPS = Map.of(
+            "grayscale", List.of("-colorspace", "Gray"),
+            "sepia", List.of("-sepia-tone", "80%"),
+            "negate", List.of("-negate"),
+            "blur", List.of("-blur", "0x8"),
+            "sharpen", List.of("-sharpen", "0x1"));
+
+    private static final int MIN_OPACITY = 1;
+    private static final int MAX_OPACITY = 100;
+    private static final int DEFAULT_OPACITY = 50;
+    private static final int MIN_FONT_SIZE = 8;
+    private static final int MAX_FONT_SIZE = 400;
+    private static final int DEFAULT_FONT_SIZE = 36;
+    private static final String DEFAULT_WATERMARK_GRAVITY = "southeast";
 
     @Value("${app.temp-dir:/tmp}")
     private String tempDir;
@@ -108,6 +130,91 @@ public class ImagesConversionService implements IImagesConversionService {
         String ext = outputExt(file);
         logger.info("Image crop → {}x{} (gravity={}), input {} bytes", width, height, gravity, file.getSize());
         return runMagick(file, ext, buildCropOps(width, height, gravity));
+    }
+
+    @Override
+    public ByteArrayResource favicon(MultipartFile file, String sizes) throws IOException {
+        List<Integer> faviconSizes = parseFaviconSizes(sizes);
+        logger.info("Favicon generation, sizes={}, input {} bytes", faviconSizes, file.getSize());
+
+        String srcExt = getExtension(file.getOriginalFilename());
+        Path inputFile = null;
+        Path outputFile = null;
+        try {
+            inputFile = createTempFile("favicon-in-", srcExt.isEmpty() ? ".bin" : "." + srcExt);
+            outputFile = createTempFile("favicon-out-", ".ico");
+            try (InputStream in = file.getInputStream()) {
+                Files.copy(in, inputFile, StandardCopyOption.REPLACE_EXISTING);
+            }
+            List<String> command = buildFaviconCommand(inputFile.toString(), outputFile.toString(), faviconSizes);
+            runProcess(command, "Favicon generation");
+            byte[] result = Files.readAllBytes(outputFile);
+            logger.info("Favicon completed. Output size: {} bytes", result.length);
+            return new ByteArrayResource(result);
+        } finally {
+            cleanupQuietly(inputFile);
+            cleanupQuietly(outputFile);
+        }
+    }
+
+    @Override
+    public ByteArrayResource filter(MultipartFile file, String filter) throws IOException {
+        String ext = outputExt(file);
+        logger.info("Image filter → {}, input {} bytes", filter, file.getSize());
+        return runMagick(file, ext, filterOps(filter));
+    }
+
+    @Override
+    public ByteArrayResource watermark(MultipartFile file, MultipartFile watermarkImage, String text,
+                                       String gravity, Integer opacity, Integer fontSize) throws IOException {
+        boolean hasImage = watermarkImage != null && !watermarkImage.isEmpty();
+        boolean hasText = text != null && !text.isBlank();
+        if (hasImage == hasText) {
+            throw new IllegalArgumentException("Provide exactly one of: watermark image or text");
+        }
+
+        String ext = outputExt(file);
+        int opacityValue = opacity == null ? DEFAULT_OPACITY : opacity;
+        String gravityValue = (gravity == null || gravity.isBlank()) ? DEFAULT_WATERMARK_GRAVITY : gravity;
+        logger.info("Image watermark ({}) gravity={} opacity={}, input {} bytes",
+                hasImage ? "image" : "text", gravityValue, opacityValue, file.getSize());
+
+        Path inputFile = null;
+        Path watermarkFile = null;
+        Path outputFile = null;
+        try {
+            inputFile = createTempFile("wm-in-", "." + ext);
+            outputFile = createTempFile("wm-out-", "." + ext);
+            try (InputStream in = file.getInputStream()) {
+                Files.copy(in, inputFile, StandardCopyOption.REPLACE_EXISTING);
+            }
+
+            List<String> command;
+            if (hasImage) {
+                String wmExt = getExtension(watermarkImage.getOriginalFilename());
+                watermarkFile = createTempFile("wm-mark-", wmExt.isEmpty() ? ".png" : "." + wmExt);
+                try (InputStream in = watermarkImage.getInputStream()) {
+                    Files.copy(in, watermarkFile, StandardCopyOption.REPLACE_EXISTING);
+                }
+                command = buildWatermarkImageCommand(inputFile.toString(), watermarkFile.toString(),
+                        outputFile.toString(), gravityValue, opacityValue);
+            } else {
+                int fontSizeValue = fontSize == null ? DEFAULT_FONT_SIZE : fontSize;
+                if (fontSizeValue < MIN_FONT_SIZE || fontSizeValue > MAX_FONT_SIZE) {
+                    throw new IllegalArgumentException("fontSize must be " + MIN_FONT_SIZE + ".." + MAX_FONT_SIZE);
+                }
+                command = buildWatermarkTextCommand(inputFile.toString(), outputFile.toString(), text,
+                        gravityValue, opacityValue, fontSizeValue);
+            }
+            runProcess(command, "Watermark");
+            byte[] result = Files.readAllBytes(outputFile);
+            logger.info("Watermark completed. Output size: {} bytes", result.length);
+            return new ByteArrayResource(result);
+        } finally {
+            cleanupQuietly(inputFile);
+            cleanupQuietly(watermarkFile);
+            cleanupQuietly(outputFile);
+        }
     }
 
     // ── Pure helpers (unit-tested) ──────────────────────────────────────
@@ -212,6 +319,76 @@ public class ImagesConversionService implements IImagesConversionService {
         return List.of("-resize", wh + "^", "-gravity", normGravity(gravity), "-extent", wh, "+repage");
     }
 
+    static List<Integer> parseFaviconSizes(String sizes) {
+        if (sizes == null || sizes.isBlank()) return DEFAULT_FAVICON_SIZES;
+        List<Integer> result = new ArrayList<>();
+        for (String s : sizes.split(",")) {
+            int v;
+            try {
+                v = Integer.parseInt(s.trim());
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("Invalid favicon size: " + s);
+            }
+            if (v < MIN_FAVICON_SIZE || v > MAX_FAVICON_SIZE) {
+                throw new IllegalArgumentException(
+                        "Favicon size must be " + MIN_FAVICON_SIZE + ".." + MAX_FAVICON_SIZE + ": " + v);
+            }
+            result.add(v);
+        }
+        if (result.isEmpty()) {
+            throw new IllegalArgumentException("No favicon sizes provided");
+        }
+        return result;
+    }
+
+    // magick <input> -define icon:auto-resize=16,32,48,... <output.ico>
+    static List<String> buildFaviconCommand(String input, String output, List<Integer> sizes) {
+        String sizesArg = sizes.stream().map(String::valueOf).collect(Collectors.joining(","));
+        return List.of("magick", input, "-define", "icon:auto-resize=" + sizesArg, output);
+    }
+
+    static List<String> filterOps(String filter) {
+        String key = normalizeFormat(filter);
+        List<String> ops = FILTER_OPS.get(key);
+        if (ops == null) {
+            throw new IllegalArgumentException("Unsupported filter: " + filter + ". Supported: " + FILTER_OPS.keySet());
+        }
+        return ops;
+    }
+
+    static void validateOpacity(int opacity) {
+        if (opacity < MIN_OPACITY || opacity > MAX_OPACITY) {
+            throw new IllegalArgumentException("opacity must be " + MIN_OPACITY + ".." + MAX_OPACITY);
+        }
+    }
+
+    static String opacityFraction(int opacity) {
+        validateOpacity(opacity);
+        return String.format(Locale.ROOT, "%.2f", opacity / 100.0);
+    }
+
+    // magick <input> ( <watermark> -alpha set -channel A -evaluate Multiply <opacity> +channel )
+    //        -gravity <g> -compose over -composite <output>
+    static List<String> buildWatermarkImageCommand(String input, String watermark, String output,
+                                                    String gravity, int opacity) {
+        String frac = opacityFraction(opacity);
+        return List.of("magick", input,
+                "(", watermark, "-alpha", "set", "-channel", "A", "-evaluate", "Multiply", frac, "+channel", ")",
+                "-gravity", normGravity(gravity), "-compose", "over", "-composite", output);
+    }
+
+    // magick <input> -gravity <g> -fill rgba(255,255,255,<opacity>) -pointsize <n> -annotate +20+20 <text> <output>
+    static List<String> buildWatermarkTextCommand(String input, String output, String text,
+                                                  String gravity, int opacity, int fontSize) {
+        String frac = opacityFraction(opacity);
+        return List.of("magick", input,
+                "-gravity", normGravity(gravity),
+                "-fill", "rgba(255,255,255," + frac + ")",
+                "-pointsize", String.valueOf(fontSize),
+                "-annotate", "+20+20", text,
+                output);
+    }
+
     // Run `magick <input> <ops...> <ext>:<output>` and return the bytes.
     private ByteArrayResource runMagick(MultipartFile file, String ext, List<String> ops) throws IOException {
         Path inputFile = null;
@@ -254,6 +431,33 @@ public class ImagesConversionService implements IImagesConversionService {
         } finally {
             cleanupQuietly(inputFile);
             cleanupQuietly(outputFile);
+        }
+    }
+
+    // Run an arbitrary ImageMagick command and wait for it; throws IOException on failure/timeout.
+    private void runProcess(List<String> command, String opName) throws IOException {
+        logger.debug("ImageMagick command: {}", command);
+        ProcessBuilder pb = new ProcessBuilder(command);
+        pb.redirectErrorStream(true);
+        Process process;
+        try {
+            process = pb.start();
+            StringBuilder output = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) output.append(line).append('\n');
+            }
+            if (!process.waitFor(30, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                throw new IOException(opName + " timed out");
+            }
+            if (process.exitValue() != 0) {
+                logger.error("{} failed (exit {}): {}", opName, process.exitValue(), output);
+                throw new IOException(opName + " failed: " + output.toString().trim());
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException(opName + " interrupted", e);
         }
     }
 

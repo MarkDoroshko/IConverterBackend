@@ -18,6 +18,7 @@ public class MediaTypeUtils {
         EXTENSION_TO_MEDIA_TYPE.put("bmp", MediaType.valueOf("image/bmp"));
         EXTENSION_TO_MEDIA_TYPE.put("webp", MediaType.valueOf("image/webp"));
         EXTENSION_TO_MEDIA_TYPE.put("svg", MediaType.valueOf("image/svg+xml"));
+        EXTENSION_TO_MEDIA_TYPE.put("ico", MediaType.valueOf("image/x-icon"));
         EXTENSION_TO_MEDIA_TYPE.put("pdf", MediaType.APPLICATION_PDF);
         // Добавьте другие форматы по мере необходимости
     }

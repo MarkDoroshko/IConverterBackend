@@ -109,4 +109,76 @@ class ImagesConversionServiceTest {
         assertThat(normGravity("southeast")).isEqualTo("SouthEast");
         assertThatThrownBy(() -> normGravity("middle")).isInstanceOf(IllegalArgumentException.class);
     }
+
+    // ── favicon ──────────────────────────────────────────────────────────
+
+    @Test
+    void parseFaviconSizes_defaultsWhenBlank() {
+        assertThat(parseFaviconSizes(null)).containsExactly(16, 32, 48, 64, 128, 256);
+        assertThat(parseFaviconSizes("")).containsExactly(16, 32, 48, 64, 128, 256);
+        assertThat(parseFaviconSizes("  ")).containsExactly(16, 32, 48, 64, 128, 256);
+    }
+
+    @Test
+    void parseFaviconSizes_parsesCommaList() {
+        assertThat(parseFaviconSizes("16, 32,64")).containsExactly(16, 32, 64);
+    }
+
+    @Test
+    void parseFaviconSizes_rejectsOutOfRangeOrInvalid() {
+        assertThatThrownBy(() -> parseFaviconSizes("8")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> parseFaviconSizes("1024")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> parseFaviconSizes("abc")).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void buildFaviconCommand_joinsSizes() {
+        assertThat(buildFaviconCommand("/in.png", "/out.ico", List.of(16, 32, 64)))
+                .containsExactly("magick", "/in.png", "-define", "icon:auto-resize=16,32,64", "/out.ico");
+    }
+
+    // ── filters ──────────────────────────────────────────────────────────
+
+    @Test
+    void filterOps_knownFilters() {
+        assertThat(filterOps("grayscale")).containsExactly("-colorspace", "Gray");
+        assertThat(filterOps("SEPIA")).containsExactly("-sepia-tone", "80%");
+        assertThat(filterOps("negate")).containsExactly("-negate");
+    }
+
+    @Test
+    void filterOps_rejectsUnknown() {
+        assertThatThrownBy(() -> filterOps("cartoon")).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    // ── watermark ────────────────────────────────────────────────────────
+
+    @Test
+    void opacityFraction_formatsAsDecimal() {
+        assertThat(opacityFraction(50)).isEqualTo("0.50");
+        assertThat(opacityFraction(1)).isEqualTo("0.01");
+        assertThat(opacityFraction(100)).isEqualTo("1.00");
+    }
+
+    @Test
+    void opacityFraction_rejectsOutOfRange() {
+        assertThatThrownBy(() -> opacityFraction(0)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> opacityFraction(101)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void buildWatermarkImageCommand_buildsCompositeSequence() {
+        assertThat(buildWatermarkImageCommand("/in.png", "/wm.png", "/out.png", "southeast", 50))
+                .containsExactly("magick", "/in.png",
+                        "(", "/wm.png", "-alpha", "set", "-channel", "A", "-evaluate", "Multiply", "0.50", "+channel", ")",
+                        "-gravity", "SouthEast", "-compose", "over", "-composite", "/out.png");
+    }
+
+    @Test
+    void buildWatermarkTextCommand_buildsAnnotateSequence() {
+        assertThat(buildWatermarkTextCommand("/in.png", "/out.png", "Hello", "north", 25, 20))
+                .containsExactly("magick", "/in.png",
+                        "-gravity", "North", "-fill", "rgba(255,255,255,0.25)",
+                        "-pointsize", "20", "-annotate", "+20+20", "Hello", "/out.png");
+    }
 }
