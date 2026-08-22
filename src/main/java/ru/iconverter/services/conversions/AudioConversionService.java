@@ -7,6 +7,7 @@ import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import ru.iconverter.utils.ProcessUtils;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -42,6 +43,11 @@ public class AudioConversionService implements IAudioConversionService {
     @Value("${app.temp-dir:/tmp}")
     private String tempDir;
 
+    // See ru.iconverter.utils.ProcessUtils — bounds ffmpeg's virtual memory so
+    // it fails cleanly instead of risking an OOM-killer hit on the JVM.
+    @Value("${app.process.memory-limit-mb:1200}")
+    private long processMemoryLimitMb;
+
     @Override
     public Resource trim(MultipartFile file, String startTime, String endTime) {
         if (file.isEmpty()) {
@@ -68,7 +74,7 @@ public class AudioConversionService implements IAudioConversionService {
             log.info("Audio trim {} [{} → {}] ({} bytes)", source, start, end, file.getSize());
             log.debug("ffmpeg command: {}", command);
 
-            ProcessBuilder pb = new ProcessBuilder(command);
+            ProcessBuilder pb = new ProcessBuilder(ProcessUtils.withMemoryLimit(command, processMemoryLimitMb));
             pb.redirectErrorStream(true);
             Process process = pb.start();
             StringBuilder output = new StringBuilder();
@@ -122,7 +128,7 @@ public class AudioConversionService implements IAudioConversionService {
             log.info("Audio convert {} → {} ({} bytes)", source, target, file.getSize());
             log.debug("ffmpeg command: {}", command);
 
-            ProcessBuilder pb = new ProcessBuilder(command);
+            ProcessBuilder pb = new ProcessBuilder(ProcessUtils.withMemoryLimit(command, processMemoryLimitMb));
             pb.redirectErrorStream(true);
             Process process = pb.start();
             StringBuilder output = new StringBuilder();

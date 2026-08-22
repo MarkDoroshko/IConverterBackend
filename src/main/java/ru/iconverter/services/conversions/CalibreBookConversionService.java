@@ -7,6 +7,7 @@ import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import ru.iconverter.utils.ProcessUtils;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -14,6 +15,7 @@ import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.List;
 import java.util.Set;
 
 @Service
@@ -29,6 +31,11 @@ public class CalibreBookConversionService implements IBookConversionService {
     // Путь к временной директории (по умолчанию /tmp)
     @Value("${app.temp-dir:/tmp}")
     private String tempDir;
+
+    // See ru.iconverter.utils.ProcessUtils — bounds ebook-convert's virtual
+    // memory so it fails cleanly instead of risking an OOM-killer hit on the JVM.
+    @Value("${app.process.memory-limit-mb:1200}")
+    private long processMemoryLimitMb;
 
     @Override
     public Resource convertBook(MultipartFile file, String sourceFormat, String targetFormat) {
@@ -67,11 +74,9 @@ public class CalibreBookConversionService implements IBookConversionService {
                     inputFile.getFileName(), outputFile.getFileName(), sourceFormat, targetFormat);
 
             // Запускаем ebook-convert
+            List<String> command = List.of("ebook-convert", inputFile.toString(), outputFile.toString());
             ProcessBuilder processBuilder = new ProcessBuilder(
-                    "ebook-convert",
-                    inputFile.toString(),
-                    outputFile.toString()
-            );
+                    ProcessUtils.withMemoryLimit(command, processMemoryLimitMb));
             processBuilder.redirectErrorStream(true);
             Process process = processBuilder.start();
 
