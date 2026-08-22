@@ -3,6 +3,7 @@ package ru.iconverter.controller;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -10,7 +11,9 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import ru.iconverter.entity.ErrorLog;
+import ru.iconverter.ratelimit.FixedWindowRateLimiter;
 import ru.iconverter.repository.ErrorLogRepository;
+import ru.iconverter.utils.RequestUtils;
 
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -21,16 +24,22 @@ import java.time.LocalDateTime;
 // stack traces. Validation problems are the client's fault (400); conversion
 // I/O failures are server-side (500). Every handled exception is also
 // persisted to the error_log table (best-effort — a logging failure must
-// never affect the response sent to the client).
+// never affect the response sent to the client), capped per-IP so a client
+// that keeps hitting an error path can't grow the table (and disk) without
+// bound — the general API rate limiter allows the same request rate whether
+// it succeeds or fails, so it doesn't protect against this on its own.
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     private final ErrorLogRepository errorLogRepository;
+    private final FixedWindowRateLimiter errorLogLimiter;
 
-    public GlobalExceptionHandler(ErrorLogRepository errorLogRepository) {
+    public GlobalExceptionHandler(ErrorLogRepository errorLogRepository,
+                                   @Value("${app.error-log.rate-limit-per-minute:20}") int rateLimitPerMinute) {
         this.errorLogRepository = errorLogRepository;
+        this.errorLogLimiter = new FixedWindowRateLimiter(rateLimitPerMinute, 60_000L);
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
@@ -65,6 +74,10 @@ public class GlobalExceptionHandler {
     }
 
     private void persist(String level, Exception e, HttpServletRequest request, boolean withStackTrace) {
+        String clientIp = RequestUtils.clientIp(request);
+        if (!errorLogLimiter.allow(clientIp, System.currentTimeMillis())) {
+            return;
+        }
         try {
             errorLogRepository.save(ErrorLog.builder()
                     .timestamp(LocalDateTime.now())
@@ -74,7 +87,7 @@ public class GlobalExceptionHandler {
                     .stackTrace(withStackTrace ? stackTraceOf(e) : null)
                     .requestUri(request.getRequestURI())
                     .httpMethod(request.getMethod())
-                    .clientIp(request.getRemoteAddr())
+                    .clientIp(clientIp)
                     .userAgent(truncate(request.getHeader("User-Agent"), 512))
                     .build());
         } catch (Exception saveFailure) {

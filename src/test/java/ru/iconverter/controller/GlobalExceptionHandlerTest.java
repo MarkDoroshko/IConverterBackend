@@ -18,7 +18,7 @@ import static org.mockito.Mockito.when;
 class GlobalExceptionHandlerTest {
 
     private final ErrorLogRepository repository = mock(ErrorLogRepository.class);
-    private final GlobalExceptionHandler handler = new GlobalExceptionHandler(repository);
+    private final GlobalExceptionHandler handler = new GlobalExceptionHandler(repository, 20);
 
     private HttpServletRequest requestStub() {
         HttpServletRequest request = mock(HttpServletRequest.class);
@@ -53,5 +53,18 @@ class GlobalExceptionHandlerTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
         assertThat(response.getBody().toString()).contains("conversion failed");
+    }
+
+    @Test
+    void stopsPersistingOnceThePerIpRateLimitIsHit() {
+        GlobalExceptionHandler limitedHandler = new GlobalExceptionHandler(repository, 3);
+
+        for (int i = 0; i < 5; i++) {
+            ResponseEntity<?> response = limitedHandler.handleBadInput(
+                    new IllegalArgumentException("bad file"), requestStub());
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        }
+
+        verify(repository, org.mockito.Mockito.times(3)).save(any(ErrorLog.class));
     }
 }

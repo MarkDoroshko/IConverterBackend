@@ -12,6 +12,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
+import ru.iconverter.utils.RequestUtils;
 
 import java.io.IOException;
 
@@ -42,7 +43,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             chain.doFilter(request, response);
             return;
         }
-        String ip = clientIp(request);
+        String ip = RequestUtils.clientIp(request);
         if (!limiter.allow(ip, System.currentTimeMillis())) {
             log.warn("Rate limit exceeded for {} ({} req/min)", ip, maxPerMinute);
             response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
@@ -53,15 +54,5 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return;
         }
         chain.doFilter(request, response);
-    }
-
-    // Behind nginx the real client IP is in X-Forwarded-For; fall back to the
-    // socket address for direct/local access.
-    private String clientIp(HttpServletRequest request) {
-        String xff = request.getHeader("X-Forwarded-For");
-        if (xff != null && !xff.isBlank()) {
-            return xff.split(",")[0].trim();
-        }
-        return request.getRemoteAddr();
     }
 }
