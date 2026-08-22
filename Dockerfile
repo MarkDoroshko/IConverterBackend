@@ -95,8 +95,9 @@ WORKDIR /app
 
 COPY --from=builder /build/target/iconverter-*-SNAPSHOT.jar /app/app.jar
 
-# Working dirs: tmp for conversions, logs for Spring file appender
-RUN mkdir -p /app/logs /tmp/iconverter \
+# Working dirs: tmp for conversions, logs for Spring file appender,
+# data for the SQLite database (error log / contact messages)
+RUN mkdir -p /app/logs /app/data /tmp/iconverter \
  && chown -R app:app /app /tmp/iconverter
 
 USER app
