@@ -37,6 +37,18 @@ public class CalibreBookConversionService implements IBookConversionService {
     @Value("${app.process.memory-limit-mb:1200}")
     private long processMemoryLimitMb;
 
+    // Substrings seen in ebook-convert's own output when it dies from hitting
+    // the memory limit above (or genuine host memory pressure) rather than a
+    // problem with the file itself — Calibre doesn't report this as a distinct
+    // exit code, so the only signal is these known OOM messages in its stdout.
+    private static final List<String> MEMORY_FAILURE_MARKERS = List.of(
+            "cannot allocate memory",
+            "memoryerror",
+            "out of memory",
+            "pthread_create: resource temporarily unavailable",
+            "resource temporarily unavailable"
+    );
+
     @Override
     public Resource convertBook(MultipartFile file, String sourceFormat, String targetFormat) {
         if (file.isEmpty()) {
@@ -91,9 +103,15 @@ public class CalibreBookConversionService implements IBookConversionService {
 
             int exitCode = process.waitFor();
             if (exitCode != 0) {
-                String errorMsg = "Ошибка конвертации (код: " + exitCode + "): " + output;
-                log.error(errorMsg);
-                throw new RuntimeException(errorMsg);
+                // Full tool output (which can include Python tracebacks) is only ever
+                // logged server-side, never returned to the client as-is.
+                log.error("Ошибка конвертации (код: {}): {}", exitCode, output);
+                if (isMemoryFailure(output.toString())) {
+                    throw new RuntimeException("Не удалось конвертировать файл: серверу не хватило памяти " +
+                            "для обработки файла такого размера или сложности. Попробуйте уменьшить размер файла " +
+                            "(например, сжать изображения внутри него) или конвертировать его частями.");
+                }
+                throw new RuntimeException("Ошибка конвертации (код: " + exitCode + "): " + output);
             }
 
             log.info("Конвертация успешна: {} -> {}", sourceFormat, targetFormat);
@@ -109,6 +127,10 @@ public class CalibreBookConversionService implements IBookConversionService {
             Thread.currentThread().interrupt();
             log.error("Конвертация прервана", e);
             throw new RuntimeException("Процесс конвертации был прерван", e);
+        } catch (RuntimeException e) {
+            // Already a clean, user-facing message (built above) — re-throw as-is
+            // instead of re-wrapping it in the generic "Неизвестная ошибка" below.
+            throw e;
         } catch (Exception e) {
             log.error("Неизвестная ошибка при конвертации", e);
             throw new RuntimeException("Ошибка конвертации: " + e.getMessage(), e);
@@ -136,6 +158,11 @@ public class CalibreBookConversionService implements IBookConversionService {
         if (sourceFormat.equals(targetFormat)) {
             throw new IllegalArgumentException("Исходный и целевой форматы одинаковы: " + targetFormat);
         }
+    }
+
+    protected boolean isMemoryFailure(String processOutput) {
+        String lower = processOutput.toLowerCase();
+        return MEMORY_FAILURE_MARKERS.stream().anyMatch(lower::contains);
     }
 
     private String getFileExtension(String filename) {
