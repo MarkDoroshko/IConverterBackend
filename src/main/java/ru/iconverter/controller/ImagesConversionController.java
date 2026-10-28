@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import ru.iconverter.services.IMediaTypeService;
 import ru.iconverter.services.conversions.IImagesConversionService;
+import ru.iconverter.services.conversions.ImagesConversionService;
 
 import java.io.IOException;
 
@@ -159,12 +160,9 @@ public class ImagesConversionController {
                 .body((Resource) resource);
     }
 
-    // Output keeps the input format; derive content type from the file extension.
+    // Output keeps the input format (HEIC → JPG); match the service's choice.
     private MediaType mediaTypeFor(MultipartFile file) {
-        String name = file.getOriginalFilename();
-        int dot = name == null ? -1 : name.lastIndexOf('.');
-        String ext = dot >= 0 ? name.substring(dot + 1) : "";
-        return mediaTypeService.getMediaType(ext);
+        return mediaTypeService.getMediaType(ImagesConversionService.outputExt(file));
     }
 
     private ResponseEntity<?> validate(MultipartFile file) {

@@ -44,6 +44,7 @@ public class ImagesConversionService implements IImagesConversionService {
             Set.of("jpg", "jpeg", "png", "gif", "bmp", "webp", "tiff");
 
     private static final Set<String> JPEG_ALIASES = Set.of("jpeg", "jfif", "jpe", "pjpeg");
+    private static final Set<String> HEIC_EXTENSIONS = Set.of("heic", "heif");
 
     private static final int MIN_QUALITY = 1;
     private static final int MAX_QUALITY = 100;
@@ -420,10 +421,12 @@ public class ImagesConversionService implements IImagesConversionService {
     }
 
     // Output keeps the input format; reject formats ImageMagick can't write here.
-    static String outputExt(MultipartFile file) {
+    // HEIC/HEIF become JPG: browsers can't display HEIC and encoding it is
+    // memory-heavy on the shared VPS.
+    public static String outputExt(MultipartFile file) {
         String ext = getExtension(file.getOriginalFilename());
         // .jfif/.jpe/.pjpeg are plain JPEG files under another extension.
-        if (JPEG_ALIASES.contains(ext)) ext = "jpg";
+        if (JPEG_ALIASES.contains(ext) || HEIC_EXTENSIONS.contains(ext)) ext = "jpg";
         validateTargetFormat(ext);
         return ext;
     }

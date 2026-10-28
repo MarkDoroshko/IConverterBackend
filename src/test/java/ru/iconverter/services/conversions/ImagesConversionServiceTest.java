@@ -239,8 +239,14 @@ class ImagesConversionServiceTest {
     }
 
     @Test
+    void outputExt_mapsHeicToJpg() {
+        assertThat(outputExt(new MockMultipartFile("file", "IMG_1.HEIC", null, new byte[]{1}))).isEqualTo("jpg");
+        assertThat(outputExt(new MockMultipartFile("file", "a.heif", null, new byte[]{1}))).isEqualTo("jpg");
+    }
+
+    @Test
     void outputExt_rejectsUnsupported() {
-        assertThatThrownBy(() -> outputExt(new MockMultipartFile("file", "a.heic", null, new byte[]{1})))
+        assertThatThrownBy(() -> outputExt(new MockMultipartFile("file", "a.svg", null, new byte[]{1})))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 }
