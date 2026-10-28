@@ -1,6 +1,7 @@
 package ru.iconverter.services.conversions;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockMultipartFile;
 
 import java.util.List;
 
@@ -227,5 +228,19 @@ class ImagesConversionServiceTest {
     void buildBackgroundRemovalResizeCommand_capsAt1000_onlyShrinks() {
         assertThat(buildBackgroundRemovalResizeCommand("/in.jpg", "/out.png"))
                 .containsExactly("magick", "/in.jpg", "-resize", "1000x1000>", "png:/out.png");
+    }
+
+    @Test
+    void outputExt_mapsJpegAliasesToJpg() {
+        for (String name : List.of("a.jpeg", "a.JFIF", "a.jpe", "a.pjpeg")) {
+            assertThat(outputExt(new MockMultipartFile("file", name, null, new byte[]{1}))).isEqualTo("jpg");
+        }
+        assertThat(outputExt(new MockMultipartFile("file", "a.png", null, new byte[]{1}))).isEqualTo("png");
+    }
+
+    @Test
+    void outputExt_rejectsUnsupported() {
+        assertThatThrownBy(() -> outputExt(new MockMultipartFile("file", "a.heic", null, new byte[]{1})))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 }

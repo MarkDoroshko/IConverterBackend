@@ -9,6 +9,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static ru.iconverter.services.WhoisService.parseReferral;
 import static ru.iconverter.services.WhoisService.parseWhoisServer;
+import static ru.iconverter.services.WhoisService.normalizeDomain;
 import static ru.iconverter.services.WhoisService.validateDomain;
 
 // Pure validation/parsing tests. No network access, no real WHOIS queries.
@@ -26,6 +27,16 @@ class WhoisServiceTest {
         assertThatThrownBy(() -> validateDomain("")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> validateDomain("not a domain")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> validateDomain("no-tld")).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void normalizeDomain_stripsUrlPartsAndTrailingDot() {
+        assertThat(normalizeDomain("https://car.ru/")).isEqualTo("car.ru");
+        assertThat(normalizeDomain(" HTTP://Ask.RegLab.ru/path?q=1#x ")).isEqualTo("ask.reglab.ru");
+        assertThat(normalizeDomain("example.com:8080")).isEqualTo("example.com");
+        assertThat(normalizeDomain("uraltechnomash.ru.")).isEqualTo("uraltechnomash.ru");
+        assertThat(normalizeDomain("iconverter.ru")).isEqualTo("iconverter.ru");
+        assertThat(normalizeDomain(null)).isNull();
     }
 
     @Test

@@ -46,6 +46,21 @@ public class WhoisService implements IWhoisService {
         }
     }
 
+    // Users often paste a full URL ("https://example.ru/page") or a trailing
+    // FQDN dot; reduce that to the bare host before validation.
+    public static String normalizeDomain(String input) {
+        if (input == null) return null;
+        String host = input.trim().replaceFirst("(?i)^[a-z][a-z0-9+.-]*://", "");
+        int end = host.length();
+        for (char c : new char[]{'/', '?', '#', ':'}) {
+            int i = host.indexOf(c);
+            if (i >= 0 && i < end) end = i;
+        }
+        host = host.substring(0, end);
+        if (host.endsWith(".")) host = host.substring(0, host.length() - 1);
+        return host.toLowerCase();
+    }
+
     public static Optional<String> parseReferral(String ianaResponse) {
         Matcher m = REFER_LINE.matcher(ianaResponse);
         return m.find() ? Optional.of(m.group(1)) : Optional.empty();
@@ -58,8 +73,8 @@ public class WhoisService implements IWhoisService {
 
     @Override
     public String lookup(String domain) {
-        validateDomain(domain);
-        String normalized = domain.trim().toLowerCase();
+        String normalized = normalizeDomain(domain);
+        validateDomain(normalized);
 
         String ianaResponse = query(IANA_WHOIS, normalized);
         String registryServer = parseReferral(ianaResponse)
