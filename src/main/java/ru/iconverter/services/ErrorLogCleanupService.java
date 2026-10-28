@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import ru.iconverter.repository.ErrorLogRepository;
 
 import java.time.LocalDateTime;
@@ -25,7 +26,10 @@ public class ErrorLogCleanupService {
         this.retentionDays = retentionDays;
     }
 
+    // Derived delete queries need an active transaction; without one Spring
+    // Data throws InvalidDataAccessApiUsageException and nothing is purged.
     @Scheduled(cron = "0 0 3 * * *")
+    @Transactional
     public void deleteOldEntries() {
         LocalDateTime cutoff = LocalDateTime.now().minusDays(retentionDays);
         long deleted = errorLogRepository.deleteByTimestampBefore(cutoff);
