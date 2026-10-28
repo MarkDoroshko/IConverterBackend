@@ -32,6 +32,7 @@ public class VideoConversionService implements IVideoConversionService {
     // Video transcoding is much heavier than audio — give ffmpeg more time
     // before we give up and kill the process.
     private static final long TIMEOUT_SECONDS = 300;
+    private static final int OUTPUT_TAIL_CHARS = 1500;
 
     public static final Set<String> SUPPORTED_TARGET_FORMATS =
             Set.of("mp4", "avi", "mov", "mkv", "webm");
@@ -176,6 +177,14 @@ public class VideoConversionService implements IVideoConversionService {
     }
 
     // ── Pure helpers (unit-tested) ──────────────────────────────────────
+
+    // ffmpeg prints a long banner and config dump first; the error is at the end.
+    static String outputTail(String output) {
+        String trimmed = output.strip();
+        return trimmed.length() <= OUTPUT_TAIL_CHARS
+                ? trimmed
+                : "..." + trimmed.substring(trimmed.length() - OUTPUT_TAIL_CHARS);
+    }
 
     static String normalize(String s) {
         if (s == null) return "";
@@ -349,7 +358,10 @@ public class VideoConversionService implements IVideoConversionService {
             }
             if (process.exitValue() != 0) {
                 log.error("ffmpeg failed (exit {}): {}", process.exitValue(), output);
-                throw new RuntimeException(failureMessage);
+                // The user only sees failureMessage; the ffmpeg tail goes into the
+                // cause so the persisted stack trace shows the actual reason.
+                throw new RuntimeException(failureMessage,
+                        new RuntimeException("ffmpeg exit " + process.exitValue() + ": " + outputTail(output.toString())));
             }
         } catch (IOException e) {
             throw new RuntimeException("Ошибка при обработке видео: " + e.getMessage(), e);

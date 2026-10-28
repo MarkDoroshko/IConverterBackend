@@ -141,4 +141,13 @@ class VideoConversionServiceTest {
                 .containsExactly("ffmpeg", "-y", "-ss", "0", "-t", "5", "-i", "/i.mp4", "-i", "/p.png",
                         "-filter_complex", "fps=10,scale=480:-1:flags=lanczos[x];[x][1:v]paletteuse", "/o.gif");
     }
+
+    @Test
+    void outputTail_keepsShortOutputAndTrimsLongFromStart() {
+        assertThat(outputTail("  short error\n")).isEqualTo("short error");
+        String longOutput = "x".repeat(5000) + "Invalid argument";
+        String tail = outputTail(longOutput);
+        assertThat(tail).startsWith("...").endsWith("Invalid argument");
+        assertThat(tail.length()).isEqualTo(1503);
+    }
 }
