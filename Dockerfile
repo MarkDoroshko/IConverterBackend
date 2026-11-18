@@ -55,15 +55,29 @@ RUN apt-get update \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 
-# Ubuntu ships ImageMagick with "rights=none" rules (CVE-2016-3714 mitigation)
-# that block coders/filters/delegates. Remove the catch-all patterns AND the
-# targeted PDF/PS/EPS/XPS bans so the image→PDF tool can write PDF. Inputs are
-# validated and size-capped; modern IM+Ghostscript patch the original CVE.
-# Robust: also matches the grouped form pattern="{PS,PS2,PS3,EPS,PDF,XPS}".
-RUN sed -i -E \
+# ImageMagick hardening. Two things are true about the Ubuntu package:
+#  * the stock policy.xml here does NOT have the historical "rights=none
+#    pattern=*" catch-all (so PDF/PS coders are usable), but several dangerous
+#    coders (MSL, MVG, EPHEMERAL, …) are only referenced in comments;
+#  * our Img→PDF tool needs the PDF *write* coder.
+# So instead of deleting protections and hoping, drop the blanket bans if a
+# future base image reintroduces them and append an explicit deny list for
+# coders that interpret ImageMagick's own scripting/URL protocols and for the
+# PostScript family (never an accepted upload format here — the gs delegate
+# used for PDF write does not go through the PS coder). This keeps the
+# CVE-2016-3714 class of "upload a script as an image" attacks closed while
+# leaving JPEG/PNG/WebP/TIFF/SVG/HEIC/PDF-write untouched.
+RUN set -eux; \
+    policy=/etc/ImageMagick-6/policy.xml; \
+    sed -i -E \
       -e '/<policy domain="(coder|filter|delegate)" rights="none" pattern="\*"/d' \
       -e '/<policy domain="coder" rights="none" pattern="[^"]*(PDF|PS|EPS|XPS)[^"]*"/d' \
-      /etc/ImageMagick-6/policy.xml
+      "$policy"; \
+    if ! grep -q 'ICONVERTER-CODER-DENY' "$policy"; then \
+      sed -i 's#</policymap>#  <!-- ICONVERTER-CODER-DENY: script/URL coders and the PostScript family. -->\n  <policy domain="coder" rights="none" pattern="{MSL,MVG,URL,HTTPS,HTTP,FTP,EPHEMERAL,TMP,PLT,PCL,PS,PS2,PS3,EPS,EPSF,EPSI,XPS}"/>\n</policymap>#' "$policy"; \
+    fi; \
+    grep -q 'ICONVERTER-CODER-DENY' "$policy"; \
+    grep -qF 'pattern="@*"' "$policy"
 
 # rembg: AI background removal (U^2-Net-portable ONNX model, CPU inference
 # via onnxruntime), served by docker/rembg_server.py — a small FastAPI

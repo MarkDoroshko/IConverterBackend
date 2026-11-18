@@ -111,7 +111,11 @@ public class CalibreBookConversionService implements IBookConversionService {
                             "для обработки файла такого размера или сложности. Попробуйте уменьшить размер файла " +
                             "(например, сжать изображения внутри него) или конвертировать его частями.");
                 }
-                throw new RuntimeException("Ошибка конвертации (код: " + exitCode + "): " + output);
+                // Exit code and full tool output stay in the log: the output can
+                // contain temp paths, Python tracebacks and tool versions, and
+                // GlobalExceptionHandler sends RuntimeException messages to the
+                // client verbatim.
+                throw new RuntimeException("Не удалось сконвертировать файл. Попробуйте другой файл или формат.");
             }
 
             log.info("Конвертация успешна: {} -> {}", sourceFormat, targetFormat);

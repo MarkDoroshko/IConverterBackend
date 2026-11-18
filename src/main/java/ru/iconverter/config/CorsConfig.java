@@ -14,10 +14,17 @@ public class CorsConfig {
             @Override
             public void addCorsMappings(CorsRegistry registry) {
                 registry.addMapping("/api/**")
-                        .allowedOrigins("https://iconverter.ru", "http://62.113.41.18:7777", "https://62.113.41.18:7777")
-                        .allowedMethods("GET", "POST", "PUT", "DELETE")
+                        // Только боевой origin. IP-адрес сервера с портом 7777
+                        // (и по HTTP) из allow-list убран: за ним нет ничего,
+                        // кроме самого сервера, а plain-HTTP origin ослаблял
+                        // политику без пользы.
+                        .allowedOrigins("https://iconverter.ru", "https://www.iconverter.ru")
+                        .allowedMethods("GET", "POST", "OPTIONS")
                         .allowedHeaders("*")
-                        .allowCredentials(true);
+                        // Cookie/сессии не используются — credentials не нужны,
+                        // и с false нельзя случайно открыть CORS-доступ к ним.
+                        .allowCredentials(false)
+                        .maxAge(3600);
             }
         };
     }

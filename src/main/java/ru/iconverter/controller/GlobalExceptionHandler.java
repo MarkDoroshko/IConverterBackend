@@ -19,6 +19,7 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.time.LocalDateTime;
+import java.util.Map;
 
 // Maps common failures to clean JSON responses instead of leaking 500s and
 // stack traces. Validation problems are the client's fault (400); conversion
@@ -33,6 +34,11 @@ public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
+    // Messages originating from our services are meant for humans; everything
+    // else is sanitised. The cap keeps a pathological exception from becoming
+    // a large response body.
+    private static final int MAX_MESSAGE_LENGTH = 500;
+
     private final ErrorLogRepository errorLogRepository;
     private final FixedWindowRateLimiter errorLogLimiter;
 
@@ -43,20 +49,21 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<?> handleBadInput(IllegalArgumentException e, HttpServletRequest request) {
+    public ResponseEntity<Map<String, String>> handleBadInput(IllegalArgumentException e, HttpServletRequest request) {
         log.warn("Bad request: {}", e.getMessage());
         persist("WARN", e, request, false);
         return json(HttpStatus.BAD_REQUEST, e.getMessage());
     }
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)
-    public ResponseEntity<?> handleTooLarge(MaxUploadSizeExceededException e, HttpServletRequest request) {
+    public ResponseEntity<Map<String, String>> handleTooLarge(MaxUploadSizeExceededException e,
+                                                               HttpServletRequest request) {
         persist("WARN", e, request, false);
         return json(HttpStatus.BAD_REQUEST, "Файл слишком большой");
     }
 
     @ExceptionHandler(IOException.class)
-    public ResponseEntity<?> handleIo(IOException e, HttpServletRequest request) {
+    public ResponseEntity<Map<String, String>> handleIo(IOException e, HttpServletRequest request) {
         log.error("Conversion I/O error", e);
         persist("ERROR", e, request, true);
         return json(HttpStatus.INTERNAL_SERVER_ERROR, "Conversion failed. Please try again.");
@@ -65,8 +72,10 @@ public class GlobalExceptionHandler {
     // Our conversion services throw RuntimeException with a user-safe message
     // (e.g. "Не удалось преобразовать изображение в PDF"). Surface it instead of
     // a bare Spring 500 page so the client/operator sees the actual cause.
+    // Services must never put raw tool output in these messages (see
+    // CalibreBookConversionService) — that is what the server-side log is for.
     @ExceptionHandler(RuntimeException.class)
-    public ResponseEntity<?> handleRuntime(RuntimeException e, HttpServletRequest request) {
+    public ResponseEntity<Map<String, String>> handleRuntime(RuntimeException e, HttpServletRequest request) {
         log.error("Conversion error", e);
         persist("ERROR", e, request, true);
         return json(HttpStatus.INTERNAL_SERVER_ERROR,
@@ -108,10 +117,21 @@ public class GlobalExceptionHandler {
         return value.substring(0, maxLength);
     }
 
-    private ResponseEntity<?> json(HttpStatus status, String message) {
-        String safe = message == null ? "Unexpected error" : message.replace("\"", "'");
+    /**
+     * Builds {@code {"error": "..."}} via Jackson (Map body) instead of string
+     * concatenation: the old version only escaped double quotes, so a message
+     * containing a backslash or control characters produced invalid JSON.
+     * Control characters are stripped and the length capped; the message is
+     * still text, never HTML, and Spring serialises it as a JSON string.
+     */
+    private ResponseEntity<Map<String, String>> json(HttpStatus status, String message) {
+        String safe = message == null || message.isBlank() ? "Unexpected error" : message;
+        safe = safe.replaceAll("\\p{Cntrl}", " ").trim();
+        if (safe.length() > MAX_MESSAGE_LENGTH) {
+            safe = safe.substring(0, MAX_MESSAGE_LENGTH);
+        }
         return ResponseEntity.status(status)
                 .contentType(MediaType.APPLICATION_JSON)
-                .body("{\"error\": \"" + safe + "\"}");
+                .body(Map.of("error", safe));
     }
 }

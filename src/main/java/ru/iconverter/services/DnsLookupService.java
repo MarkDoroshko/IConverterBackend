@@ -13,6 +13,7 @@ import org.xbill.DNS.Record;
 import org.xbill.DNS.TXTRecord;
 import org.xbill.DNS.TextParseException;
 import org.xbill.DNS.Type;
+import ru.iconverter.utils.NetworkUtils;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -64,6 +65,10 @@ public class DnsLookupService implements IDnsLookupService {
             Record[] records = lookup.run();
             if (records == null) return List.of();
             return List.of(records).stream()
+                    // The endpoint is public and unauthenticated: never hand out
+                    // addresses from the server's own network (RFC 1918,
+                    // loopback, link-local, CGNAT, IPv6 ULA, …).
+                    .filter(this::isPublicRecord)
                     .map(this::formatRecord)
                     .toList();
         } catch (TextParseException e) {
@@ -72,6 +77,24 @@ public class DnsLookupService implements IDnsLookupService {
             log.warn("DNS query failed for {} type {}: {}", host, Type.string(type), e.getMessage());
             return List.of();
         }
+    }
+
+    private boolean isPublicRecord(Record record) {
+        if (record instanceof ARecord r) {
+            return isPublic(r.getAddress(), record);
+        }
+        if (record instanceof AAAARecord r) {
+            return isPublic(r.getAddress(), record);
+        }
+        return true;
+    }
+
+    private boolean isPublic(java.net.InetAddress address, Record record) {
+        boolean isPublic = NetworkUtils.isPublicAddress(address);
+        if (!isPublic) {
+            log.info("Suppressed non-public DNS answer {} for {}", address.getHostAddress(), record.getName());
+        }
+        return isPublic;
     }
 
     private String formatRecord(Record record) {

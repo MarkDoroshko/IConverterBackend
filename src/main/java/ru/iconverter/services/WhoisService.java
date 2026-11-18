@@ -3,6 +3,7 @@ package ru.iconverter.services;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import ru.iconverter.utils.NetworkUtils;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -36,6 +37,11 @@ public class WhoisService implements IWhoisService {
 
     private static final Pattern WHOIS_SERVER_LINE =
             Pattern.compile("(?im)^(?:whois server|registrar whois server|referralserver)\\s*:\\s*(?:whois://)?(\\S+)\\s*$");
+
+    // Same hostname grammar as the public API's input validation: no IP
+    // literals, no ports, no paths — a WHOIS "refer:" line is remote input.
+    private static final Pattern HOSTNAME =
+            Pattern.compile("^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,63}$");
 
     public static void validateDomain(String domain) {
         if (domain == null || domain.isBlank()) {
@@ -77,13 +83,19 @@ public class WhoisService implements IWhoisService {
         validateDomain(normalized);
 
         String ianaResponse = query(IANA_WHOIS, normalized);
+        // The referral comes from a remote server over plaintext TCP — treat it
+        // as untrusted input: only follow it if it is a hostname that resolves
+        // exclusively to public addresses (otherwise the API could be steered
+        // at localhost / the internal network).
         String registryServer = parseReferral(ianaResponse)
+                .filter(WhoisService::isPublicHost)
                 .orElseThrow(() -> new IllegalArgumentException("No WHOIS registry found for: " + normalized));
 
         String registryResponse = query(registryServer, normalized);
 
         return parseWhoisServer(registryResponse)
                 .filter(server -> !server.equalsIgnoreCase(registryServer))
+                .filter(WhoisService::isPublicHost)
                 .map(server -> {
                     try {
                         return query(server, normalized);
@@ -94,6 +106,31 @@ public class WhoisService implements IWhoisService {
                     }
                 })
                 .orElse(registryResponse);
+    }
+
+    /**
+     * True when {@code host} is a syntactically valid hostname that resolves to
+     * public addresses only. {@code getAllByName} is safe here: the input has
+     * already been constrained to a hostname literal (no IP, no port, no path).
+     */
+    static boolean isPublicHost(String host) {
+        if (host == null || host.length() > 253 || !HOSTNAME.matcher(host).matches()) {
+            return false;
+        }
+        try {
+            java.net.InetAddress[] addresses = java.net.InetAddress.getAllByName(host);
+            if (addresses.length == 0) {
+                return false;
+            }
+            for (java.net.InetAddress address : addresses) {
+                if (!NetworkUtils.isPublicAddress(address)) {
+                    return false;
+                }
+            }
+            return true;
+        } catch (java.net.UnknownHostException e) {
+            return false;
+        }
     }
 
     private String query(String server, String domain) {
