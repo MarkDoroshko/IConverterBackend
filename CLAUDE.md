@@ -26,8 +26,9 @@ Each conversion domain follows the same three-layer pattern: `controller/*Conver
 | Video | `/api/convert/video/` (+ `resize`, `trim`, `gif`) | ffmpeg |
 
 Other notable pieces:
-- `ratelimit/FixedWindowRateLimiter.java` + `RateLimitFilter.java` — per-IP rate limiting applied to all of `/api/**` (`app.rate-limit.per-minute`, default 60/min).
-- `config/CorsConfig.java` — allow-list of origins allowed to call the API; update when the frontend's domain/port changes.
+- `ratelimit/FixedWindowRateLimiter.java` + `RateLimitFilter.java` — per-IP rate limiting applied to all of `/api/**` (`app.rate-limit.per-minute`, default 60/min); `/api/devtools/**` has its own tighter budget (`app.rate-limit.devtools-per-minute`, default 10/min). Keys come from `utils/RequestUtils.clientIp()`, which trusts forwarding headers only from a loopback/private proxy.
+- `ratelimit/ConversionConcurrencyFilter.java` — process-wide semaphore on `/api/convert/**` (`app.conversion.max-concurrent`, default 3); extra requests get `503 + Retry-After` instead of queueing, so a burst can't OOM the container.
+- `config/CorsConfig.java` — allow-list of origins allowed to call the API (only the https site origins; no cookie credentials). Update when the frontend's domain changes.
 - `controller/GlobalExceptionHandler.java` — converts failures to JSON `{"error": "..."}`.
 - Limits: 25 MB per file (audio/video: 50 MB), enforced before invoking the CLI tools. Video transcodes use a longer ffmpeg timeout (300s) than other domains (120s) since re-encoding is heavier.
 - Trim endpoints (audio + video) use ffmpeg `-c copy` (stream copy, no re-encode) and accept start/end as seconds or `HH:MM:SS`. GIF export is two-pass (`palettegen` + `paletteuse`) and caps clip duration at 15s.
