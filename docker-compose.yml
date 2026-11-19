@@ -17,7 +17,9 @@ services:
     # processes/memory/CPU.
     read_only: true
     tmpfs:
-      - /tmp:size=768m,mode=1777
+      # exec is needed: sqlite-jdbc extracts a native .so into /tmp and dlopen
+      # fails on a noexec mount; numba also writes its JIT cache there.
+      - /tmp:size=768m,mode=1777,exec
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -25,3 +27,6 @@ services:
     pids_limit: 256
     mem_limit: 2g
     cpus: 2.0
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+      - NUMBA_CACHE_DIR=/tmp
