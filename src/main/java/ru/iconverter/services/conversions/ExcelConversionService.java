@@ -10,6 +10,7 @@ import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import ru.iconverter.utils.LibreOfficeProfile;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
@@ -61,6 +62,7 @@ public class ExcelConversionService implements IExcelConversionService {
         try {
             workDir = Files.createTempDirectory(Paths.get(tempDir), "excel-");
             profileDir = Files.createTempDirectory(Paths.get(tempDir), "lo-profile-");
+            LibreOfficeProfile.writeSecureProfile(profileDir);
             Path input = workDir.resolve("input." + source);
             file.transferTo(input.toFile());
 

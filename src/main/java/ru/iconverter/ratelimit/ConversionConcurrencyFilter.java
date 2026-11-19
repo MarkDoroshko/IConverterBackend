@@ -25,11 +25,11 @@ import java.util.concurrent.Semaphore;
  * JVM OOM-killed. Across many IPs it is trivial to reach. This filter answers
  * 503 immediately (instead of queueing and timing out) once every slot is busy.
  *
- * <p>Ordered after {@link RateLimitFilter} so rejected-by-rate requests never
- * occupy a permit.
+ * <p>Ordered after {@link RateLimitFilter} and {@link ConversionQuotaFilter} so
+ * requests rejected by either limiter never occupy a permit.
  */
 @Component
-@Order(2)
+@Order(3)
 public class ConversionConcurrencyFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(ConversionConcurrencyFilter.class);
@@ -55,6 +55,7 @@ public class ConversionConcurrencyFilter extends OncePerRequestFilter {
             log.warn("All {} conversion slots are busy, rejecting {}", maxConcurrent, request.getRequestURI());
             response.setStatus(HttpStatus.SERVICE_UNAVAILABLE.value());
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            response.setCharacterEncoding("UTF-8");
             response.setHeader("Retry-After", "10");
             response.getWriter().write(
                     "{\"error\": \"Сервер сейчас загружен. Попробуйте через несколько секунд.\"}");

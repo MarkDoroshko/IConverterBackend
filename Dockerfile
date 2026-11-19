@@ -125,4 +125,4 @@ ENV JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75"
 # container, only ImagesConversionService talks to it. Backgrounded and
 # unsupervised (no process manager); if it dies, background removal starts
 # failing until the container restarts, but every other endpoint is unaffected.
-ENTRYPOINT ["sh","-c","cd /opt/rembg-server && python3 -m uvicorn rembg_server:app --host 127.0.0.1 --port 5000 & exec java $JAVA_OPTS -jar /app/app.jar"]
+ENTRYPOINT ["sh","-c","mkdir -p /tmp/iconverter; cd /opt/rembg-server && python3 -m uvicorn rembg_server:app --host 127.0.0.1 --port 5000 & exec java $JAVA_OPTS -jar /app/app.jar"]

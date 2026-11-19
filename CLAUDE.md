@@ -27,7 +27,10 @@ Each conversion domain follows the same three-layer pattern: `controller/*Conver
 
 Other notable pieces:
 - `ratelimit/FixedWindowRateLimiter.java` + `RateLimitFilter.java` — per-IP rate limiting applied to all of `/api/**` (`app.rate-limit.per-minute`, default 60/min); `/api/devtools/**` has its own tighter budget (`app.rate-limit.devtools-per-minute`, default 10/min). Keys come from `utils/RequestUtils.clientIp()`, which trusts forwarding headers only from a loopback/private proxy.
+- `ratelimit/ConversionQuotaFilter.java` — longer-horizon per-IP conversion budgets (`app.conversion.hourly-per-ip`, default 100; `app.conversion.daily-per-ip`, default 400) so a slow client cannot use the service as free CPU for hours.
 - `ratelimit/ConversionConcurrencyFilter.java` — process-wide semaphore on `/api/convert/**` (`app.conversion.max-concurrent`, default 3); extra requests get `503 + Retry-After` instead of queueing, so a burst can't OOM the container.
+- `utils/HtmlSanitizer.java` — HTML uploads (including HTML disguised with another extension, detected via Tika) are rewritten before LibreOffice/Calibre: scripts, frames, external images/links and CSS URLs are removed. This closes the HTML→PDF SSRF vector; `data:image/*` payloads still work. LibreOffice also gets a per-call profile with macro execution off and external-link updates disabled.
+- `controller/ApiErrorController.java` — replaces Boot's default `/error` document with `{"error":"..."}` (no timestamp/path/exception), matching `GlobalExceptionHandler`.
 - `config/CorsConfig.java` — allow-list of origins allowed to call the API (only the https site origins; no cookie credentials). Update when the frontend's domain changes.
 - `controller/GlobalExceptionHandler.java` — converts failures to JSON `{"error": "..."}`.
 - Limits: 25 MB per file (audio/video: 50 MB), enforced before invoking the CLI tools. Video transcodes use a longer ffmpeg timeout (300s) than other domains (120s) since re-encoding is heavier.

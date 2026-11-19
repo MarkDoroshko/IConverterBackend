@@ -15,8 +15,10 @@ import org.xbill.DNS.TextParseException;
 import org.xbill.DNS.Type;
 import ru.iconverter.utils.NetworkUtils;
 
+import java.net.IDN;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Pattern;
 
@@ -31,8 +33,10 @@ public class DnsLookupService implements IDnsLookupService {
     // Labels separated by dots, each 1-63 chars of letters/digits/hyphen (no
     // leading/trailing hyphen), matching the RFC 1035 hostname grammar closely
     // enough to reject junk before it reaches dnsjava.
+    // TLD may be an ordinary ASCII label or an IDN A-label (xn--p1ai).
     private static final Pattern HOSTNAME =
-            Pattern.compile("^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,63}$");
+            Pattern.compile("^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.)+"
+                    + "(?:[a-zA-Z]{2,63}|xn--[a-zA-Z0-9-]{2,59})$");
 
     public static void validateHostname(String host) {
         if (host == null || host.isBlank()) {
@@ -44,10 +48,29 @@ public class DnsLookupService implements IDnsLookupService {
         }
     }
 
+    /**
+     * Trim, convert Unicode labels to punycode and lower-case the result so
+     * DNS tools accept both {@code пример.рф} and {@code xn--e1afmkfd.xn--p1ai}.
+     */
+    static String normalizeHostname(String host) {
+        if (host == null) {
+            throw new IllegalArgumentException("Host is required");
+        }
+        String trimmed = host.trim();
+        if (trimmed.isEmpty()) {
+            throw new IllegalArgumentException("Host is required");
+        }
+        try {
+            return IDN.toASCII(trimmed, IDN.ALLOW_UNASSIGNED).toLowerCase(Locale.ROOT);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid hostname: " + trimmed);
+        }
+    }
+
     @Override
     public Map<String, List<String>> lookup(String host) {
-        validateHostname(host);
-        String normalized = host.trim();
+        String normalized = normalizeHostname(host);
+        validateHostname(normalized);
 
         Map<String, List<String>> result = new LinkedHashMap<>();
         for (int type : QUERY_TYPES) {

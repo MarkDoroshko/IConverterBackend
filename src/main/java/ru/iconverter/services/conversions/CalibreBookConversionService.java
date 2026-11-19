@@ -7,16 +7,19 @@ import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import ru.iconverter.utils.HtmlSanitizer;
 import ru.iconverter.utils.ProcessUtils;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class CalibreBookConversionService implements IBookConversionService {
@@ -79,8 +82,17 @@ public class CalibreBookConversionService implements IBookConversionService {
             inputFile = createInputFile(file, sourceFormat);
             outputFile = createOutputFile(targetFormat);
 
-            // Записываем файл на диск
-            file.transferTo(inputFile.toFile());
+            // Записываем файл на диск. HTML обрабатываем так же, как офисный
+            // конвертер: ebook-convert тоже умеет ходить за внешними
+            // картинками/стилями, поэтому сначала вычищаем сетевые ссылки.
+            if (shouldSanitize(file, sourceFormat)) {
+                try (InputStream in = file.getInputStream()) {
+                    Files.write(inputFile, HtmlSanitizer.sanitize(in));
+                }
+                log.info("Sanitized HTML upload before ebook-convert ({} bytes)", file.getSize());
+            } else {
+                file.transferTo(inputFile.toFile());
+            }
 
             log.info("Конвертация: {} -> {} ({} -> {})",
                     inputFile.getFileName(), outputFile.getFileName(), sourceFormat, targetFormat);
@@ -101,7 +113,14 @@ public class CalibreBookConversionService implements IBookConversionService {
                 }
             }
 
-            int exitCode = process.waitFor();
+            // ebook-convert had no timeout before: a pathological file could
+            // occupy a conversion slot indefinitely. Bound it like the other
+            // converters (LibreOffice/Ghostscript/ffmpeg).
+            if (!process.waitFor(180, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                throw new RuntimeException("Конвертация книги превысила лимит времени");
+            }
+            int exitCode = process.exitValue();
             if (exitCode != 0) {
                 // Full tool output (which can include Python tracebacks) is only ever
                 // logged server-side, never returned to the client as-is.
@@ -142,6 +161,17 @@ public class CalibreBookConversionService implements IBookConversionService {
             // Гарантированная очистка временных файлов
             cleanupQuietly(inputFile);
             cleanupQuietly(outputFile);
+        }
+    }
+
+    private static boolean shouldSanitize(MultipartFile file, String sourceFormat) {
+        if ("html".equals(sourceFormat) || "htm".equals(sourceFormat)) {
+            return true;
+        }
+        try (InputStream in = file.getInputStream()) {
+            return HtmlSanitizer.looksLikeHtml(in, file.getOriginalFilename());
+        } catch (IOException e) {
+            return false;
         }
     }
 

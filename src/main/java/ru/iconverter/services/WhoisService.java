@@ -9,8 +9,10 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
+import java.net.IDN;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -29,8 +31,10 @@ public class WhoisService implements IWhoisService {
     private static final int SOCKET_TIMEOUT_MS = 10_000;
     private static final int MAX_RESPONSE_CHARS = 20_000;
 
+    // TLD may be an ordinary ASCII label or an IDN A-label (xn--p1ai).
     private static final Pattern DOMAIN =
-            Pattern.compile("^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,63}$");
+            Pattern.compile("^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.)+"
+                    + "(?:[a-zA-Z]{2,63}|xn--[a-zA-Z0-9-]{2,59})$");
 
     private static final Pattern REFER_LINE =
             Pattern.compile("(?im)^refer:\\s*(\\S+)\\s*$");
@@ -41,7 +45,8 @@ public class WhoisService implements IWhoisService {
     // Same hostname grammar as the public API's input validation: no IP
     // literals, no ports, no paths — a WHOIS "refer:" line is remote input.
     private static final Pattern HOSTNAME =
-            Pattern.compile("^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,63}$");
+            Pattern.compile("^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.)+"
+                    + "(?:[a-zA-Z]{2,63}|xn--[a-zA-Z0-9-]{2,59})$");
 
     public static void validateDomain(String domain) {
         if (domain == null || domain.isBlank()) {
@@ -64,7 +69,16 @@ public class WhoisService implements IWhoisService {
         }
         host = host.substring(0, end);
         if (host.endsWith(".")) host = host.substring(0, host.length() - 1);
-        return host.toLowerCase();
+        if (host.isEmpty()) return host;
+
+        // WHOIS servers speak ASCII. Users paste Unicode domains (пример.рф)
+        // and expect them to work; convert to the A-label (punycode) form
+        // instead of rejecting them. Already-punycode input is unchanged.
+        try {
+            return IDN.toASCII(host, IDN.ALLOW_UNASSIGNED).toLowerCase(Locale.ROOT);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid domain: " + input.trim());
+        }
     }
 
     public static Optional<String> parseReferral(String ianaResponse) {

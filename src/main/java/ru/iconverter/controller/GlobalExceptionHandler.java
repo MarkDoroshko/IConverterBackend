@@ -78,8 +78,26 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, String>> handleRuntime(RuntimeException e, HttpServletRequest request) {
         log.error("Conversion error", e);
         persist("ERROR", e, request, true);
-        return json(HttpStatus.INTERNAL_SERVER_ERROR,
-                e.getMessage() == null ? "Conversion failed" : e.getMessage());
+        return json(HttpStatus.INTERNAL_SERVER_ERROR, safeRuntimeMessage(e.getMessage()));
+    }
+
+    /**
+     * Service messages are meant for humans, but an accidental
+     * {@code "...: " + e.getMessage()} can carry temp paths or OS details.
+     * Keep the message only when it looks like a clean, user-facing sentence.
+     */
+    static String safeRuntimeMessage(String message) {
+        if (message == null || message.isBlank()) {
+            return "Не удалось обработать файл.";
+        }
+        String lower = message.toLowerCase();
+        if (message.indexOf('\n') >= 0 || message.indexOf('\r') >= 0
+                || lower.contains("/tmp") || lower.contains("/app/")
+                || lower.contains("c:\\") || lower.contains("exception")
+                || lower.contains("permission denied") || lower.contains("no such file")) {
+            return "Не удалось обработать файл.";
+        }
+        return message;
     }
 
     private void persist(String level, Exception e, HttpServletRequest request, boolean withStackTrace) {

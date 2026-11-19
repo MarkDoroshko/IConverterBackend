@@ -58,6 +58,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
                     limiter == devtoolsLimiter ? "devtools" : maxPerMinute);
             response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            response.setCharacterEncoding("UTF-8");
             response.setHeader("Retry-After", "60");
             response.getWriter().write(
                     "{\"error\": \"Слишком много запросов. Попробуйте через минуту.\"}");

@@ -12,6 +12,7 @@ import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import ru.iconverter.utils.LibreOfficeProfile;
 
 import javax.imageio.ImageIO;
 import java.awt.Dimension;
@@ -69,6 +70,7 @@ public class PowerpointConversionService implements IPowerpointConversionService
         try {
             workDir = Files.createTempDirectory(Paths.get(tempDir), "pptx-");
             profileDir = Files.createTempDirectory(Paths.get(tempDir), "lo-profile-");
+            LibreOfficeProfile.writeSecureProfile(profileDir);
             Path input = workDir.resolve("input." + source);
             file.transferTo(input.toFile());
 
@@ -100,6 +102,7 @@ public class PowerpointConversionService implements IPowerpointConversionService
         try {
             workDir = Files.createTempDirectory(Paths.get(tempDir), "pptx-");
             profileDir = Files.createTempDirectory(Paths.get(tempDir), "lo-profile-");
+            LibreOfficeProfile.writeSecureProfile(profileDir);
             Path input = workDir.resolve("input." + source);
             file.transferTo(input.toFile());
 

@@ -7,9 +7,12 @@ import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import ru.iconverter.utils.HtmlSanitizer;
+import ru.iconverter.utils.LibreOfficeProfile;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -55,7 +58,18 @@ public class OfficeConversionService implements IOfficeConversionService {
             workDir = Files.createTempDirectory(Paths.get(tempDir), "office-");
             profileDir = Files.createTempDirectory(Paths.get(tempDir), "lo-profile-");
             Path input = workDir.resolve("input." + source);
-            file.transferTo(input.toFile());
+            if (shouldSanitize(file, source)) {
+                // LibreOffice follows external <img>/CSS URLs while rendering
+                // HTML. Strip every network reference first (SSRF fix). The
+                // sniffing also covers HTML disguised with another extension.
+                try (InputStream in = file.getInputStream()) {
+                    Files.write(input, HtmlSanitizer.sanitize(in));
+                }
+                log.info("Sanitized HTML upload before LibreOffice conversion ({} bytes)", file.getSize());
+            } else {
+                file.transferTo(input.toFile());
+            }
+            LibreOfficeProfile.writeSecureProfile(profileDir);
 
             List<String> command = buildCommand(target, workDir.toString(), profileDir.toString(), input.toString());
             log.info("Office convert {} → {} ({} bytes)", source, target, file.getSize());
@@ -133,6 +147,21 @@ public class OfficeConversionService implements IOfficeConversionService {
                 "--outdir", outDir,
                 input
         );
+    }
+
+    static boolean isHtml(String source) {
+        return "html".equals(source) || "htm".equals(source);
+    }
+
+    private static boolean shouldSanitize(MultipartFile file, String source) {
+        if (isHtml(source)) {
+            return true;
+        }
+        try (InputStream in = file.getInputStream()) {
+            return HtmlSanitizer.looksLikeHtml(in, file.getOriginalFilename());
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     // LibreOffice names the output after the input base name with the new ext.

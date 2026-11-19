@@ -40,6 +40,18 @@ class WhoisServiceTest {
     }
 
     @Test
+    void normalizeDomain_convertsUnicodeToPunycode() {
+        assertThat(normalizeDomain("пример.рф")).isEqualTo("xn--e1afmkfd.xn--p1ai");
+        assertThat(normalizeDomain("https://ПРИМЕР.РФ/страница")).isEqualTo("xn--e1afmkfd.xn--p1ai");
+        assertThat(normalizeDomain("xn--e1afmkfd.xn--p1ai")).isEqualTo("xn--e1afmkfd.xn--p1ai");
+    }
+
+    @Test
+    void validateDomain_acceptsPunycodeResult() {
+        assertThatCode(() -> validateDomain(normalizeDomain("пример.рф"))).doesNotThrowAnyException();
+    }
+
+    @Test
     void parseReferral_findsReferLine() {
         String ianaResponse = """
                 % IANA WHOIS server

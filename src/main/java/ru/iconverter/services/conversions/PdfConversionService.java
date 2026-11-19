@@ -194,9 +194,10 @@ public class PdfConversionService implements IPdfConversionService {
                 throw new RuntimeException("Конвертация изображения в PDF превысила лимит времени");
             }
             if (process.exitValue() != 0) {
+                // ImageMagick output can contain temp paths and delegate
+                // versions; keep it in the server log, not in the API response.
                 log.error("magick image→pdf failed: {}", out);
-                throw new RuntimeException("Не удалось преобразовать изображение в PDF: "
-                        + out.toString().trim().replaceAll("\\s+", " "));
+                throw new RuntimeException("Не удалось преобразовать изображение в PDF.");
             }
             byte[] bytes = Files.readAllBytes(output);
             log.info("Image→PDF: {} → {} bytes", file.getSize(), bytes.length);

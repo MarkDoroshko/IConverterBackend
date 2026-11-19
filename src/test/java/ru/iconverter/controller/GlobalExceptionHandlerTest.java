@@ -56,6 +56,16 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void runtimeMessagesWithPathsOrOsDetailsAreReplacedWithGenericText() {
+        assertThat(GlobalExceptionHandler.safeRuntimeMessage("Не удалось преобразовать изображение в PDF."))
+                .isEqualTo("Не удалось преобразовать изображение в PDF.");
+        assertThat(GlobalExceptionHandler.safeRuntimeMessage("cannot read /tmp/iconverter/x.pdf"))
+                .isEqualTo("Не удалось обработать файл.");
+        assertThat(GlobalExceptionHandler.safeRuntimeMessage("java.lang.RuntimeException: boom"))
+                .isEqualTo("Не удалось обработать файл.");
+    }
+
+    @Test
     void stopsPersistingOnceThePerIpRateLimitIsHit() {
         GlobalExceptionHandler limitedHandler = new GlobalExceptionHandler(repository, 3);
 
